@@ -32,7 +32,7 @@ execute a phase from its brief alone. Conventions live in `AGENTS.md`; decisions
 
 | # | Branch | Brief | Scope | Status | Exit test |
 |---|---|---|---|---|---|
-| 1 | `ivan/phase-1-framework` | [phase-1-framework.md](docs/plans/phase-1-framework.md) | Scaffold, deps, errors/envelopes/session, clap skeleton (14 categories, stubs), DocumentManager lifecycle, BookmarkManager, Ctx DI, CI | ☐ pending | `document new→save→open→info` round-trip |
+| 1 | `ivan/phase-1-framework` | [phase-1-framework.md](docs/plans/phase-1-framework.md) | Scaffold, deps, errors/envelopes/session, clap skeleton (14 categories, stubs), DocumentManager lifecycle, BookmarkManager, Ctx DI, CI | ☑ done | `document new→save→open→info` round-trip |
 | 2 | `ivan/phase-2-content` | [phase-2-content.md](docs/plans/phase-2-content.md) | Text & structure ("HTML"): paragraph, heading, run (plain), table, list, section, toc, image, export md/txt | ☐ pending | create→mutate→save→reopen→verify |
 | 3 | `ivan/phase-3-design` | [phase-3-design.md](docs/plans/phase-3-design.md) | Design & layout ("CSS"): run format/emphasize, paragraph border, style, page ×7 | ☐ pending | formatting survives save/reopen |
 | 4 | `ivan/phase-4-misc` | [phase-4-misc.md](docs/plans/phase-4-misc.md) | Misc: meta engine/annotator/type inference, calc (polars + rhai), batch + templates, howto/README/docs rebrand | ☐ pending | ~179 ported tests green; CV batch workflow e2e |
@@ -45,3 +45,5 @@ Statuses: ☐ pending → ◐ in progress → ☑ done. Update in the merge that
 |---|---|
 | [0001](docs/adr/0001-docx-rs-engine.md) | docx-rs as the .docx engine |
 | [0002](docs/adr/0002-branch-topology.md) | carpenter-style branch topology |
+| [0003](docs/adr/0003-clap-derive-cli.md) | clap derive API for the CLI tree |
+| [0004](docs/adr/0004-bookmark-addressing.md) | bookmark addressing over docx-rs document children |
