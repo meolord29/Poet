@@ -87,7 +87,11 @@ fn no_subcommand_prints_howto_text_and_exits_0() {
     let (ctx, _dir) = setup();
     let (json, code) = run(&ctx, &[]);
     assert_eq!(code, ExitCode::SUCCESS);
-    assert!(json.contains("phase 4"), "placeholder howto until phase 4");
+    assert!(
+        json.contains("# Poet - AI-First Word Document Automation CLI"),
+        "the full rebranded howto ships in phase 4"
+    );
+    assert!(json.contains("poet batch run script.json"));
 }
 
 #[test]

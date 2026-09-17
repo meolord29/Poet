@@ -17,8 +17,9 @@ execute a phase from its brief alone. Conventions live in `AGENTS.md`; decisions
 | Session state | `~/.poet/session.json` (env-overridable for tests) | — |
 | Output contract | JSON envelope, identical shape to Words | `AGENTS.md` §2 |
 | Compatibility | None required with Python-generated .docx internals; CLI behavior parity is required | adr/0001 |
-| Table analysis | `polars` (added in phase 4) | — |
-| Expressions | `rhai` (replaces Python `eval()` in `calc transform add_column`) | adr/0006 |
+| Table analysis | `polars` (added in phase 4) | adr/0013 |
+| Expressions | `rhai` (replaces Python `eval()` in `calc transform add_column`) | adr/0013 |
+| Metadata storage | `customXml/words_meta.xml` zip part, side-read/written at open/save | adr/0012 |
 | Behavioral spec | `/home/mashkini/Workspace/Words` — port behavior, cite source paths | `AGENTS.md` |
 
 ## Branch topology (carpenter model)
@@ -35,7 +36,7 @@ execute a phase from its brief alone. Conventions live in `AGENTS.md`; decisions
 | 1 | `ivan/phase-1-framework` | [phase-1-framework.md](docs/plans/phase-1-framework.md) | Scaffold, deps, errors/envelopes/session, clap skeleton (14 categories, stubs), DocumentManager lifecycle, BookmarkManager, Ctx DI, CI | ☑ done | `document new→save→open→info` round-trip |
 | 2 | `ivan/phase-2-content` | [phase-2-content.md](docs/plans/phase-2-content.md) | Text & structure ("HTML"): paragraph, heading, run (plain), table, list, section, toc, image, export md/txt | ☑ done | create→mutate→save→reopen→verify |
 | 3 | `ivan/phase-3-design` | [phase-3-design.md](docs/plans/phase-3-design.md) | Design & layout ("CSS"): run format/emphasize, paragraph border, style, page ×7 | ☑ done | formatting survives save/reopen |
-| 4 | `ivan/phase-4-misc` | [phase-4-misc.md](docs/plans/phase-4-misc.md) | Misc: meta engine/annotator/type inference, calc (polars + rhai), batch + templates, howto/README/docs rebrand | ☐ pending | ~179 ported tests green; CV batch workflow e2e |
+| 4 | `ivan/phase-4-misc` | [phase-4-misc.md](docs/plans/phase-4-misc.md) | Misc: meta engine/annotator/type inference, calc (polars + rhai), batch + templates, howto/README/docs rebrand | ☑ done | ~179 ported tests green; CV batch workflow e2e |
 
 Statuses: ☐ pending → ◐ in progress → ☑ done. Update in the merge that completes a phase.
 
@@ -54,8 +55,10 @@ Statuses: ☐ pending → ◐ in progress → ☑ done. Update in the merge that
 | [0009](docs/adr/0009-run-formatting-and-emphasize.md) | run formatting, emphasize run-splitting, paragraph borders |
 | [0010](docs/adr/0010-style-registry.md) | style registry: styles part + builtin catalog |
 | [0011](docs/adr/0011-page-section-mapping.md) | page/section mapping, validated inputs, reader gaps |
+| [0012](docs/adr/0012-meta-custom-xml-part.md) | metadata in a custom-XML part, side-read at zip level |
+| [0013](docs/adr/0013-rhai-expression-grammar-and-calc-mapping.md) | calc on polars + rhai expression grammar |
 
-## Handover notes from phases 2–3 (for phase 4)
+## Handover notes from phases 2–4 (maintenance)
 
 Engine facts discovered the hard way — do not rediscover them:
 
@@ -98,8 +101,26 @@ Engine facts discovered the hard way — do not rediscover them:
 - **Integration-test gotcha**: `app::run_with` takes `Ctx` by value and mutates
   its own clone — a shared caller `Ctx` does NOT carry an open document across
   invocations. Chain commands with a fresh `Ctx::at_dir(dir)` per invocation
-  (session auto-open = Words' process chaining), as `tests/phase2_content.rs`
-  and `tests/phase3_design.rs` do. Note that read commands in autosaving
-  categories still trigger autosave on success — a reopened document is
-  re-saved (and must therefore be normalize-safe) even after read-only
-  commands.
+  (session auto-open = Words' process chaining), as `tests/phase2_content.rs`,
+  `tests/phase3_design.rs` and `tests/phase4_misc.rs` do. Note that read
+  commands in autosaving categories still trigger autosave on success — a
+  reopened document is re-saved (and must therefore be normalize-safe) even
+  after read-only commands.
+- **Metadata part** (adr/0012): the docx-rs reader drops custom-XML parts, so
+  the meta payload lives on `DocumentManager` and is side-read from /
+  written into the zip (`customXml/words_meta.xml`, Words' wrapper bytes).
+  `save` repoints docx-rs' always-emitted dangling `customXml/item1.xml`
+  relationship at the real part. The `words.local` namespace / `words_meta_v1`
+  version string are format constants, not branding — do not rebrand them.
+- **Batch dispatch** mirrors Words' in-process handler map: `commands/batch.rs`
+  builds typed Args structs and calls the same command fns on the shared
+  `Ctx` (no session interaction, no autosave). Batch-side problems (unknown
+  category/action, missing key) are prefixed `Command {i} ({cmd} {action}):`
+  like Words' raised exceptions; command-body failures stay unprefixed.
+- **Calc dtype policy** (adr/0013): one dtype per column — int+float upcasts,
+  bool+int → Int64 (Python bool-is-int), mixed number/text → clean
+  `calculation_error` where Words crashed with a raw polars TypeError;
+  `contains` is literal (Words leaked regex); group order is stable;
+  `--range` is a Poet-only flag with validated parsing.
+- **serde_json has `preserve_order`**: calc row/stat objects and meta
+  envelopes rely on insertion-order maps; do not drop the feature.
