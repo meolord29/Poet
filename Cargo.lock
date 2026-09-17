@@ -2234,6 +2234,7 @@ dependencies = [
  "pyo3",
  "rayon",
  "recursive",
+ "regex",
  "serde",
  "strum_macros",
  "version_check",

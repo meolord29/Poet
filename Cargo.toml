@@ -16,6 +16,8 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 polars = { version = "0.44", default-features = false, features = [
     "fmt",
+    "lazy",
+    "regex",
     "strings",
 ] }
 rhai = "1"

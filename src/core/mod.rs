@@ -4,6 +4,7 @@
 
 pub mod annotate;
 pub mod bookmark;
+pub mod calc;
 pub mod content;
 pub mod design;
 pub mod document;
