@@ -18,7 +18,10 @@ use std::path::{Path, PathBuf};
 
 use crate::core::bookmark::BookmarkManager;
 use crate::core::error::PoetError;
-use crate::models::data::{CoreProperties, DocumentInfo};
+use crate::models::data::{
+    CellText, CoreProperties, DocumentInfo, FindResult, ImageInfo, ParagraphInfo, RunInfo,
+    SectionDetail, SectionInfo, TableInfo,
+};
 
 /// Owns the open document for one CLI invocation.
 #[derive(Debug, Default, Clone)]
@@ -102,9 +105,11 @@ impl DocumentManager {
 
     /// Save the open document to `path` (clone-pack; the doc stays open).
     /// The `format` argument is accepted for CLI parity and ignored: the
-    /// engine writes .docx only.
+    /// engine writes .docx only. Field-code text is normalized first
+    /// (adr/0008) so documents with TOC fields survive reopen+save.
     pub fn save(&mut self, _format: &str, path: impl AsRef<Path>) -> Result<(), PoetError> {
-        let docx = self.docx()?;
+        let docx = self.docx_mut()?;
+        crate::core::content::normalize_field_texts(docx);
         let file_path = path.as_ref();
         let file = fs::File::create(file_path)
             .map_err(|e| PoetError::File(format!("cannot write {}: {e}", file_path.display())))?;
@@ -125,7 +130,10 @@ impl DocumentManager {
         self.core_xml = None;
     }
 
-    /// Structure summary (Words' `get_info` shape).
+    /// Structure summary (Words' `get_info` shape). Sections: embedded
+    /// sectPr paragraphs + the body-final one (adr/0008). Images count all
+    /// inline drawings, including inside tables (python-docx
+    /// `inline_shapes` walks the whole body).
     pub fn info(&self) -> Result<DocumentInfo, PoetError> {
         let docx = self.docx()?;
         let children = &docx.document.children;
@@ -139,7 +147,11 @@ impl DocumentManager {
             .count();
         let section_count = 1 + children
             .iter()
-            .filter(|c| matches!(c, docx_rs::DocumentChild::Section(_)))
+            .filter(|c| match c {
+                docx_rs::DocumentChild::Section(_) => true,
+                docx_rs::DocumentChild::Paragraph(p) => p.property.section_property.is_some(),
+                _ => false,
+            })
             .count();
         let image_count = count_drawings(children);
         let bookmark_count = children
@@ -195,6 +207,139 @@ impl DocumentManager {
         Ok(BookmarkManager::new(
             &mut self.docx_mut()?.document.children,
         ))
+    }
+}
+
+/// Thin delegates: content operations over the open document. Each method
+/// forwards to the same-named [`crate::core::content`] function; see there
+/// (and the adr pointers) for semantics.
+macro_rules! content_delegate {
+    ($($(#[$meta:meta])* $name:ident (&mut self $(, $arg:ident : $ty:ty)* ) -> $ret:ty;)*) => {
+        $(
+            $(#[$meta])*
+            #[allow(clippy::too_many_arguments)]
+            pub fn $name(&mut self $(, $arg : $ty)*) -> $ret {
+                crate::core::content::$name(self.docx_mut()? $(, $arg)*)
+            }
+        )*
+    };
+}
+
+impl DocumentManager {
+    content_delegate! {
+        /// `paragraph add`.
+        add_paragraph(&mut self, text: &str, style: Option<&str>, id: Option<&str>, page_break: bool) -> Result<String, PoetError>;
+        /// `paragraph insert`.
+        insert_paragraph(&mut self, index: usize, text: &str, style: Option<&str>, id: Option<&str>, page_break: bool) -> Result<String, PoetError>;
+        /// `paragraph update`.
+        update_paragraph(&mut self, text: &str, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `paragraph delete`.
+        delete_paragraph(&mut self, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `paragraph clear`.
+        clear_paragraph(&mut self, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `paragraph move`.
+        move_paragraph(&mut self, direction: &str, id: Option<&str>, index: Option<usize>) -> Result<usize, PoetError>;
+        /// `paragraph get` (body).
+        get_paragraph_text(&mut self, id: Option<&str>, index: Option<usize>) -> Result<String, PoetError>;
+        /// `paragraph get/delete` with cell addressing — cell text.
+        get_cell_paragraph_text(&mut self, table: Option<usize>, row: Option<usize>, col: Option<usize>, para: Option<usize>) -> Result<CellText, PoetError>;
+        /// `paragraph delete` with cell addressing.
+        delete_cell_paragraph(&mut self, table: Option<usize>, row: Option<usize>, col: Option<usize>, para: Option<usize>) -> Result<(), PoetError>;
+        /// `heading add`.
+        add_heading(&mut self, text: &str, level: u8, id: Option<&str>) -> Result<String, PoetError>;
+        /// `heading set-level`.
+        set_heading_level(&mut self, level: u8, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `list add` / `add-item`.
+        add_list_item(&mut self, text: &str, ordered: bool, level: u8, id: Option<&str>) -> Result<String, PoetError>;
+        /// `list convert`.
+        convert_to_list(&mut self, ordered: bool, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `list set-level`.
+        set_list_level(&mut self, level: u8, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `run add`.
+        add_run(&mut self, text: &str, id: Option<&str>, index: Option<usize>, bold: Option<bool>, italic: Option<bool>, underline: Option<bool>, font: Option<&str>, size: Option<f64>, color: Option<&str>) -> Result<(), PoetError>;
+        /// `run get` (body).
+        get_runs(&mut self, id: Option<&str>, index: Option<usize>) -> Result<Vec<RunInfo>, PoetError>;
+        /// `run get` with cell addressing.
+        get_cell_runs(&mut self, table: Option<usize>, row: Option<usize>, col: Option<usize>, para: Option<usize>) -> Result<Vec<RunInfo>, PoetError>;
+        /// `run clear`.
+        clear_runs(&mut self, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `table add`.
+        add_table(&mut self, rows: usize, cols: usize, id: Option<&str>, style: &str) -> Result<String, PoetError>;
+        /// `table set-cell`.
+        set_cell(&mut self, row: usize, col: usize, value: &str, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `table add-row`.
+        add_row(&mut self, id: Option<&str>, index: Option<usize>, values: Option<&[serde_json::Value]>) -> Result<(), PoetError>;
+        /// `table add-column`.
+        add_column(&mut self, id: Option<&str>, index: Option<usize>, values: Option<&[serde_json::Value]>) -> Result<(), PoetError>;
+        /// `table delete-row`.
+        delete_row(&mut self, row: usize, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `table delete-column`.
+        delete_column(&mut self, col: usize, id: Option<&str>, index: Option<usize>) -> Result<(), PoetError>;
+        /// `section add`.
+        add_section(&mut self, start_type: &str) -> Result<(), PoetError>;
+        /// `section page-break`.
+        add_page_break(&mut self, id: Option<&str>) -> Result<String, PoetError>;
+        /// `image add`.
+        add_image(&mut self, path: &str, width: Option<f64>, height: Option<f64>, id: Option<&str>) -> Result<String, PoetError>;
+        /// `image resize`.
+        resize_image(&mut self, index: usize, width: Option<f64>, height: Option<f64>) -> Result<(), PoetError>;
+        /// `image delete`.
+        delete_image(&mut self, index: usize) -> Result<(), PoetError>;
+        /// `toc add`.
+        add_toc(&mut self, levels: &str, id: Option<&str>) -> Result<String, PoetError>;
+    }
+
+    /// `paragraph list`.
+    pub fn list_paragraphs(&self) -> Result<Vec<ParagraphInfo>, PoetError> {
+        Ok(crate::core::content::list_paragraphs(self.docx()?))
+    }
+
+    /// `paragraph count`.
+    pub fn paragraph_count(&self) -> Result<usize, PoetError> {
+        Ok(crate::core::content::paragraph_count(self.docx()?))
+    }
+
+    /// `paragraph find`.
+    pub fn find_text(&self, text: &str) -> Result<Vec<FindResult>, PoetError> {
+        Ok(crate::core::content::find_text(self.docx()?, text))
+    }
+
+    /// `paragraph replace`.
+    pub fn replace_text(&mut self, find: &str, replace: &str) -> Result<usize, PoetError> {
+        Ok(crate::core::content::replace_text(
+            self.docx_mut()?,
+            find,
+            replace,
+        ))
+    }
+
+    /// `table list`.
+    pub fn list_tables(&self) -> Result<Vec<TableInfo>, PoetError> {
+        Ok(crate::core::content::list_tables(self.docx()?))
+    }
+
+    /// `table get`.
+    pub fn table_data(
+        &self,
+        id: Option<&str>,
+        index: Option<usize>,
+    ) -> Result<(usize, usize, Vec<Vec<String>>), PoetError> {
+        crate::core::content::table_data(self.docx()?, id, index)
+    }
+
+    /// `section list`.
+    pub fn list_sections(&self) -> Result<Vec<SectionInfo>, PoetError> {
+        Ok(crate::core::content::list_sections(self.docx()?))
+    }
+
+    /// `section info`.
+    pub fn section_detail(&self, index: usize) -> Result<SectionDetail, PoetError> {
+        crate::core::content::section_detail(self.docx()?, index)
+    }
+
+    /// `image list` / `image get`.
+    pub fn images(&self) -> Result<Vec<ImageInfo>, PoetError> {
+        Ok(crate::core::content::images(self.docx()?))
     }
 }
 

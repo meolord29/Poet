@@ -1,9 +1,12 @@
 //! Core helpers: error model, output contract, session, document engine,
-//! bookmark addressing. Business logic lives here — never in `commands`.
+//! bookmark addressing, content operations. Business logic lives here —
+//! never in `commands`.
 
 pub mod bookmark;
+pub mod content;
 pub mod document;
 pub mod error;
+pub mod export;
 pub mod output;
 pub mod session;
 

@@ -1,8 +1,7 @@
-//! Document commands: create/open/save/close/info (export lands in phase 2).
-//!
-//! Ported from Words' `commands/document.py`. The app layer owns the session
-//! glue around these (persist-on-new, session save/delete) exactly like the
-//! Python typer wrappers.
+//! Document commands: create/open/save/close/info/export — ported from
+//! Words' `commands/document.py`. The app layer owns the session glue
+//! around these (persist-on-new, session save/delete) exactly like the
+//! Python typer wrappers. Export walkers live in `core/export.rs`.
 
 use clap::Args;
 use serde::Serialize;
@@ -44,7 +43,7 @@ pub struct CloseArgs {}
 #[derive(Debug, Args)]
 pub struct InfoArgs {}
 
-/// Arguments for `document export` (body lands in phase 2).
+/// Arguments for `document export`.
 #[derive(Debug, Args)]
 pub struct ExportArgs {
     /// Path of the document to export.
@@ -148,12 +147,50 @@ pub fn info(ctx: &Ctx, _args: &InfoArgs) -> Result<Data, PoetError> {
     Ok(Data::DocumentInfo(info))
 }
 
-/// `document export` — implemented in phase 2 (`docs/plans/phase-2-content.md`).
-pub fn export(_ctx: &Ctx, args: &ExportArgs) -> Result<Data, PoetError> {
-    Err(PoetError::NotImplemented(format!(
-        "document export {} (phase 2)",
-        args.fmt
-    )))
+/// `document export` — write the open document (or `path`, opened lazily)
+/// to md/txt; pdf stays unsupported (Words parity).
+pub fn export(ctx: &Ctx, args: &ExportArgs) -> Result<Data, PoetError> {
+    // Words' typer wrapper computes the default out path from the raw fmt,
+    // with the pdf quirk of an empty extension.
+    let out = args.out.clone().unwrap_or_else(|| {
+        let stem = match args.path.rfind('.') {
+            Some(i) => args.path[..i].to_string(),
+            None => args.path.clone(),
+        };
+        let ext = if args.fmt == "pdf" { "" } else { &args.fmt };
+        format!("{stem}.{ext}")
+    });
+    let fmt = args.fmt.to_lowercase();
+    if fmt != "txt" && fmt != "md" && fmt != "pdf" {
+        return Err(PoetError::Validation(format!(
+            "Unsupported export format: {fmt}"
+        )));
+    }
+    if fmt == "pdf" {
+        return Err(PoetError::Unsupported(
+            "PDF export requires docx2pdf or LibreOffice; not configured".into(),
+        ));
+    }
+    // Open the document only when none is open (Words' lazy open); the
+    // session is not touched.
+    if ctx.doc.borrow().is_none() {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.open(&args.path)?;
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+    let text = crate::commands::with_doc(ctx, |mgr| {
+        let docx = mgr.docx()?;
+        match fmt.as_str() {
+            "txt" => Ok(crate::core::export::export_text(docx)),
+            _ => Ok(crate::core::export::export_markdown(docx)),
+        }
+    })?;
+    std::fs::write(&out, text).map_err(|e| PoetError::File(format!("cannot write {out}: {e}")))?;
+    Ok(Data::DocumentExported {
+        path: out,
+        format: fmt,
+        message: "Exported".into(),
+    })
 }
 
 #[cfg(test)]
@@ -218,5 +255,143 @@ mod tests {
         )
         .expect_err("no target");
         assert!(matches!(err, crate::core::error::PoetError::Validation(_)));
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::output::render;
+
+    use super::*;
+
+    fn seed_doc(ctx: &Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        mgr.add_heading("Report", 1, None).expect("heading");
+        mgr.add_paragraph("Intro text", None, None, false)
+            .expect("para");
+        let id = mgr.add_table(1, 2, None, "Table Grid").expect("table");
+        mgr.set_cell(0, 0, "a", Some(&id), None).expect("cell");
+        mgr.set_cell(0, 1, "b", Some(&id), None).expect("cell");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn export_txt_and_md_write_files() {
+        let (ctx, dir) = setup();
+        seed_doc(&ctx);
+        let out = dir.join("out.txt");
+        let (json, err) = render(&export(
+            &ctx,
+            &ExportArgs {
+                path: dir.join("ignored.docx").to_string_lossy().into_owned(),
+                fmt: "txt".into(),
+                out: Some(out.to_string_lossy().into_owned()),
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"message\": \"Exported\""));
+        assert!(json.contains("\"format\": \"txt\""));
+        let text = std::fs::read_to_string(&out).expect("txt");
+        assert_eq!(text, "Report\nIntro text\na\tb");
+
+        let out_md = dir.join("out.md");
+        let (_, err) = render(&export(
+            &ctx,
+            &ExportArgs {
+                path: "ignored.docx".into(),
+                fmt: "md".into(),
+                out: Some(out_md.to_string_lossy().into_owned()),
+            },
+        ));
+        assert!(!err);
+        let md = std::fs::read_to_string(&out_md).expect("md");
+        assert!(md.contains("# Report"));
+        assert!(md.contains("| a | b |"));
+    }
+
+    #[test]
+    fn export_default_out_path_stems_from_doc_path() {
+        let (ctx, dir) = setup();
+        seed_doc(&ctx);
+        // The doc path is ignored when a document is open; the default out
+        // path derives from the `path` argument (Words).
+        let doc_path = dir.join("sub.docx");
+        let (json, err) = render(&export(
+            &ctx,
+            &ExportArgs {
+                path: doc_path.to_string_lossy().into_owned(),
+                fmt: "md".into(),
+                out: None,
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains(&format!(
+            "\"path\": \"{}\"",
+            dir.join("sub.md").to_string_lossy()
+        )));
+        assert!(dir.join("sub.md").exists());
+    }
+
+    #[test]
+    fn export_pdf_is_unsupported_and_unknown_fmt_is_validation() {
+        let (ctx, _dir) = setup();
+        seed_doc(&ctx);
+        let err = export(
+            &ctx,
+            &ExportArgs {
+                path: "x.docx".into(),
+                fmt: "pdf".into(),
+                out: None,
+            },
+        )
+        .expect_err("pdf");
+        assert!(matches!(err, PoetError::Unsupported(ref m) if m.contains("docx2pdf")));
+        let err = export(
+            &ctx,
+            &ExportArgs {
+                path: "x.docx".into(),
+                fmt: "html".into(),
+                out: None,
+            },
+        )
+        .expect_err("html");
+        assert!(
+            matches!(err, PoetError::Validation(ref m) if m.contains("Unsupported export format"))
+        );
+    }
+
+    #[test]
+    fn export_opens_path_lazily_when_nothing_is_open() {
+        let (ctx, dir) = setup();
+        // Build and save a document first.
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        mgr.add_paragraph("lazy text", None, None, false)
+            .expect("para");
+        let doc_path = dir.join("lazy.docx");
+        mgr.save("docx", &doc_path).expect("save");
+        // Nothing is open in this context — export must open from disk.
+        let out = dir.join("lazy.txt");
+        let (_, err) = render(&export(
+            &ctx,
+            &ExportArgs {
+                path: doc_path.to_string_lossy().into_owned(),
+                fmt: "txt".into(),
+                out: Some(out.to_string_lossy().into_owned()),
+            },
+        ));
+        assert!(!err);
+        assert!(
+            ctx.doc.borrow().is_some(),
+            "export leaves the doc open (Words)"
+        );
+        assert!(
+            ctx.session.get().is_none(),
+            "export does not touch the session"
+        );
+        let text = std::fs::read_to_string(&out).expect("txt");
+        assert!(text.contains("lazy text"));
     }
 }

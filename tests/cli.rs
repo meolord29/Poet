@@ -51,11 +51,17 @@ fn document_lifecycle_round_trip_via_cli() {
 #[test]
 fn unimplemented_actions_return_error_envelope_and_exit_1() {
     let (ctx, _dir) = setup();
-    let (json, code) = run(&ctx, &["paragraph", "add", "hello"]);
-    assert_eq!(code, ExitCode::FAILURE);
-    assert!(json.contains("\"status\": \"error\""));
-    assert!(json.contains("\"code\": \"not_implemented\""));
-    assert!(json.contains("\"details\": {}"));
+    for args in [
+        vec!["paragraph", "border", "--index", "0"],
+        vec!["run", "format", "--index", "0", "--bold"],
+        vec!["run", "emphasize", "x", "--index", "0", "--bold"],
+    ] {
+        let (json, code) = run(&ctx, &args);
+        assert_eq!(code, ExitCode::FAILURE);
+        assert!(json.contains("\"status\": \"error\""));
+        assert!(json.contains("\"code\": \"not_implemented\""));
+        assert!(json.contains("\"details\": {}"));
+    }
 }
 
 #[test]
