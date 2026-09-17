@@ -758,6 +758,29 @@ pub enum Data {
         /// Human-readable summary (inside data only).
         message: String,
     },
+
+    /// `batch run`.
+    BatchRun {
+        /// Script path as given.
+        script: String,
+        /// Attempted command count (including the failed one).
+        commands_executed: usize,
+        /// Per-command envelopes, in execution order.
+        results: Vec<Value>,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `batch template`.
+    BatchTemplate {
+        /// Template name.
+        template: String,
+        /// Output path written.
+        output: String,
+        /// Command count in the template.
+        commands: usize,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
 }
 
 impl Data {

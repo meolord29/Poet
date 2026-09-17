@@ -49,14 +49,21 @@ fn document_lifecycle_round_trip_via_cli() {
 }
 
 #[test]
-fn unimplemented_actions_return_error_envelope_and_exit_1() {
-    let (ctx, _dir) = setup();
-    // The last phase-4 stub; `meta` and `calc` are ported now.
-    let (json, code) = run(&ctx, &["batch", "run", "script.json"]);
-    assert_eq!(code, ExitCode::FAILURE);
-    assert!(json.contains("\"status\": \"error\""));
-    assert!(json.contains("\"code\": \"not_implemented\""));
-    assert!(json.contains("\"details\": {}"));
+fn batch_template_cli_smoke() {
+    let (ctx, dir) = setup();
+    let template_path = dir.join("basic.json");
+    let (json, code) = run(
+        &ctx,
+        &[
+            "batch",
+            "template",
+            "basic",
+            &template_path.to_string_lossy(),
+        ],
+    );
+    assert_eq!(code, ExitCode::SUCCESS);
+    assert!(json.contains("Template generated"));
+    assert!(template_path.exists());
 }
 
 #[test]
