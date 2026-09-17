@@ -262,6 +262,59 @@ pub enum Data {
         /// Human-readable summary (inside data only).
         message: String,
     },
+    /// `run format`.
+    RunFormatted {
+        /// Bookmark id argument (or `null`).
+        id: Option<String>,
+        /// Index argument (or `null`).
+        index: Option<usize>,
+        /// Run targeted (or `null` = every run).
+        run_index: Option<usize>,
+        /// The options actually applied (Words keys; absent = untouched).
+        applied: AppliedFormat,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `run emphasize`.
+    RunEmphasized {
+        /// Bookmark id argument (or `null`).
+        id: Option<String>,
+        /// Index argument (or `null`).
+        index: Option<usize>,
+        /// Table index argument (or `null`).
+        table: Option<usize>,
+        /// Cell row argument (or `null`).
+        row: Option<usize>,
+        /// Cell column argument (or `null`).
+        col: Option<usize>,
+        /// Cell paragraph index argument (or `null`).
+        para: Option<usize>,
+        /// The emphasized substring.
+        find: String,
+        /// Number of occurrences formatted (0 is a successful no-match).
+        replacements: usize,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+
+    /// `style list`.
+    StylesListed {
+        /// All registry styles matching the type filter.
+        styles: Vec<StyleInfo>,
+        /// Style count.
+        count: usize,
+    },
+    /// `style apply`.
+    StyleApplied {
+        /// Bookmark id argument (or `null`).
+        id: Option<String>,
+        /// Index argument (or `null`).
+        index: Option<usize>,
+        /// Style name as requested.
+        style: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
 
     /// `heading add`.
     HeadingAdded {
@@ -451,6 +504,82 @@ pub enum Data {
         message: String,
     },
 
+    /// `page margins`.
+    MarginsSet {
+        /// Section index.
+        section: usize,
+        /// Top margin value as given (or `null`).
+        top: Option<f64>,
+        /// Bottom margin value as given (or `null`).
+        bottom: Option<f64>,
+        /// Left margin value as given (or `null`).
+        left: Option<f64>,
+        /// Right margin value as given (or `null`).
+        right: Option<f64>,
+        /// Unit argument.
+        unit: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `page orientation`.
+    OrientationSet {
+        /// Section index.
+        section: usize,
+        /// Orientation as requested.
+        orientation: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `page size`.
+    PageSizeSet {
+        /// Section index.
+        section: usize,
+        /// Width value as given (or `null`).
+        width: Option<f64>,
+        /// Height value as given (or `null`).
+        height: Option<f64>,
+        /// Unit argument.
+        unit: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `page header`.
+    HeaderSet {
+        /// Section index.
+        section: usize,
+        /// Header text.
+        header: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `page footer`.
+    FooterSet {
+        /// Section index.
+        section: usize,
+        /// Footer text.
+        footer: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `page page-numbers`.
+    PageNumbersAdded {
+        /// Section index.
+        section: usize,
+        /// Alignment argument.
+        align: String,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `page columns`.
+    ColumnsSet {
+        /// Section index.
+        section: usize,
+        /// Column count as requested.
+        columns: usize,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+
     /// `toc add`.
     TocAdded {
         /// Bookmark id of the TOC paragraph.
@@ -606,6 +735,57 @@ pub struct RunInfo {
     pub size: Option<f64>,
     /// Hex color without `#` (or `null`).
     pub color: Option<String>,
+}
+
+/// The `applied` map of `run format` — Words' manager-side key names, and
+/// only the options actually provided (absent keys are not serialized).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AppliedFormat {
+    /// Bold applied (`--no-bold` = `false`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+    /// Italic applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub italic: Option<bool>,
+    /// Underline applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underline: Option<bool>,
+    /// Font name applied (Words' `font_name` key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_name: Option<String>,
+    /// Font size applied in points (Words' `font_size` key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f64>,
+    /// Hex color applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+impl AppliedFormat {
+    /// Mirror a [`crate::core::design::FormatSpec`] onto Words' key names.
+    pub fn from_spec(spec: &crate::core::design::FormatSpec) -> Self {
+        AppliedFormat {
+            bold: spec.bold,
+            italic: spec.italic,
+            underline: spec.underline,
+            font_name: spec.font.clone(),
+            font_size: spec.size,
+            color: spec.color.clone(),
+        }
+    }
+}
+
+/// One entry of `style list` (Words' `list_styles` shape; `type` keeps the
+/// `str(WD_STYLE_TYPE.X)` rendering, adr/0010).
+#[derive(Debug, Clone, Serialize)]
+pub struct StyleInfo {
+    /// Style display name.
+    pub name: String,
+    /// Type rendering, e.g. `PARAGRAPH (1)`.
+    pub r#type: String,
+    /// docx-rs carries no `customStyle` model, so this is always `true`
+    /// (adr/0010).
+    pub builtin: bool,
 }
 
 /// Text of one cell paragraph or all of them (`paragraph get` cell mode).

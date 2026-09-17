@@ -341,6 +341,136 @@ impl DocumentManager {
     pub fn images(&self) -> Result<Vec<ImageInfo>, PoetError> {
         Ok(crate::core::content::images(self.docx()?))
     }
+
+    /// `run format`.
+    pub fn run_format(
+        &mut self,
+        id: Option<&str>,
+        index: Option<usize>,
+        spec: &crate::core::design::FormatSpec,
+        run_index: Option<usize>,
+    ) -> Result<(), PoetError> {
+        crate::core::design::run_format(self.docx_mut()?, id, index, spec, run_index)
+    }
+
+    /// `run emphasize` — returns the number of formatted occurrences.
+    #[allow(clippy::too_many_arguments)]
+    pub fn emphasize(
+        &mut self,
+        find: &str,
+        spec: &crate::core::design::FormatSpec,
+        all: bool,
+        id: Option<&str>,
+        index: Option<usize>,
+        table: Option<usize>,
+        row: Option<usize>,
+        col: Option<usize>,
+        para: Option<usize>,
+    ) -> Result<usize, PoetError> {
+        crate::core::design::emphasize(
+            self.docx_mut()?,
+            find,
+            spec,
+            all,
+            id,
+            index,
+            table,
+            row,
+            col,
+            para,
+        )
+    }
+
+    /// `paragraph border`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_paragraph_border(
+        &mut self,
+        position: &str,
+        color: &str,
+        size: i64,
+        space: i64,
+        style: &str,
+        id: Option<&str>,
+        index: Option<usize>,
+    ) -> Result<(), PoetError> {
+        crate::core::design::set_paragraph_border(
+            self.docx_mut()?,
+            position,
+            color,
+            size,
+            space,
+            style,
+            id,
+            index,
+        )
+    }
+
+    /// `style list`.
+    pub fn list_styles(
+        &self,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::models::data::StyleInfo>, PoetError> {
+        crate::core::design::list_styles(self.docx()?, type_filter)
+    }
+
+    /// `style apply`.
+    pub fn apply_style(
+        &mut self,
+        style: &str,
+        id: Option<&str>,
+        index: Option<usize>,
+    ) -> Result<(), PoetError> {
+        crate::core::design::apply_style(self.docx_mut()?, style, id, index)
+    }
+
+    /// `page margins`.
+    pub fn set_margins(
+        &mut self,
+        top: Option<f64>,
+        bottom: Option<f64>,
+        left: Option<f64>,
+        right: Option<f64>,
+        unit: &str,
+        section: usize,
+    ) -> Result<(), PoetError> {
+        crate::core::design::set_margins(self.docx_mut()?, top, bottom, left, right, unit, section)
+    }
+
+    /// `page orientation`.
+    pub fn set_orientation(&mut self, orientation: &str, section: usize) -> Result<(), PoetError> {
+        crate::core::design::set_orientation(self.docx_mut()?, orientation, section)
+    }
+
+    /// `page size`.
+    pub fn set_page_size(
+        &mut self,
+        width: Option<f64>,
+        height: Option<f64>,
+        unit: &str,
+        section: usize,
+    ) -> Result<(), PoetError> {
+        crate::core::design::set_page_size(self.docx_mut()?, width, height, unit, section)
+    }
+
+    /// `page header`.
+    pub fn set_header(&mut self, text: &str, section: usize) -> Result<(), PoetError> {
+        crate::core::design::set_header(self.docx_mut()?, text, section)
+    }
+
+    /// `page footer`.
+    pub fn set_footer(&mut self, text: &str, section: usize) -> Result<(), PoetError> {
+        crate::core::design::set_footer(self.docx_mut()?, text, section)
+    }
+
+    /// `page page-numbers`.
+    pub fn add_page_numbers(&mut self, align: &str, section: usize) -> Result<(), PoetError> {
+        crate::core::design::add_page_numbers(self.docx_mut()?, align, section)
+    }
+
+    /// `page columns`.
+    pub fn set_columns(&mut self, count: usize, section: usize) -> Result<(), PoetError> {
+        crate::core::design::set_columns(self.docx_mut()?, count, section)
+    }
 }
 
 /// Extract the text of the first `<tag ...>text</tag>` occurrence.

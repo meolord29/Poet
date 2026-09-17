@@ -1,10 +1,8 @@
 //! Paragraph commands — ported from Words' `commands/paragraph.py` +
-//! `document_manager.py` content methods (adr/0006 addressing). `border`
-//! stays stubbed until phase 3 (its CLI shape is final).
+//! `document_manager.py` content methods (adr/0006 addressing).
 
 use clap::Args;
 
-use crate::commands::stub_actions;
 use crate::core::Ctx;
 use crate::core::error::PoetError;
 use crate::core::output::Data;
@@ -201,8 +199,30 @@ pub enum ParagraphAction {
     Count(CountArgs),
 }
 
-stub_actions! {
-    border => BorderArgs,
+/// `paragraph border` — set one `w:pBdr` side of a paragraph (position
+/// validated in the core layer before resolution, like Words).
+pub fn border(ctx: &Ctx, args: &BorderArgs) -> Result<Data, PoetError> {
+    crate::commands::with_doc(ctx, |mgr| {
+        mgr.set_paragraph_border(
+            &args.position,
+            &args.color,
+            args.size,
+            args.space,
+            &args.style,
+            args.address.id.as_deref(),
+            args.address.index,
+        )
+    })?;
+    Ok(Data::ParagraphBorder {
+        id: args.address.id.clone(),
+        index: args.address.index,
+        position: args.position.clone(),
+        color: args.color.clone(),
+        size: args.size,
+        space: args.space,
+        style: args.style.clone(),
+        message: format!("Paragraph {} border set", args.position),
+    })
 }
 
 /// `paragraph add` — append and bookmark a paragraph.
@@ -636,5 +656,57 @@ mod tests {
         let (ctx, _dir) = setup();
         let err = count(&ctx, &CountArgs {}).expect_err("no doc");
         assert!(matches!(err, PoetError::DocumentState(_)));
+    }
+
+    #[test]
+    fn border_envelope_and_position_validation() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx, &_dir);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "boxed".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("add");
+        let (json, err) = render(&border(
+            &ctx,
+            &BorderArgs {
+                position: "top".into(),
+                color: "AA0011".into(),
+                size: 8,
+                space: 2,
+                style: "double".into(),
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"position\": \"top\""));
+        assert!(json.contains("\"color\": \"AA0011\""));
+        assert!(json.contains("\"style\": \"double\""));
+        assert!(json.contains("\"message\": \"Paragraph top border set\""));
+
+        let err = border(
+            &ctx,
+            &BorderArgs {
+                position: "middle".into(),
+                color: "000000".into(),
+                size: 4,
+                space: 1,
+                style: "single".into(),
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+            },
+        )
+        .expect_err("bad position");
+        assert!(matches!(err, PoetError::Validation(ref m) if m.contains("'middle'")));
     }
 }

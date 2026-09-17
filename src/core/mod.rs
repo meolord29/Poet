@@ -4,6 +4,7 @@
 
 pub mod bookmark;
 pub mod content;
+pub mod design;
 pub mod document;
 pub mod error;
 pub mod export;
