@@ -50,110 +50,43 @@ pub enum BatchAction {
     Template(TemplateArgs),
 }
 
-/// The three built-in templates, byte-for-byte as Words' `TEMPLATES`
-/// (2-space indent, no trailing newline).
+/// The three built-in templates, byte-for-byte the JSON payloads of Words'
+/// `TEMPLATES` (compact source form; `template` writes them with the
+/// `json.dump(indent=2)`-equivalent pretty serializer, no trailing newline).
 const TEMPLATES: &[(&str, &str)] = &[
     (
         "basic",
         r#"[
-  {
-    "cmd": "document",
-    "action": "new",
-    "path": "output.docx"
-  },
-  {
-    "cmd": "heading",
-    "action": "add",
-    "text": "My Document",
-    "level": 1
-  },
-  {
-    "cmd": "paragraph",
-    "action": "add",
-    "text": "Hello World."
-  },
-  {
-    "cmd": "document",
-    "action": "save",
-    "path": "output.docx"
-  }
+  {"cmd": "document", "action": "new", "path": "output.docx"},
+  {"cmd": "heading", "action": "add", "text": "My Document", "level": 1},
+  {"cmd": "paragraph", "action": "add", "text": "Hello World."},
+  {"cmd": "document", "action": "save", "path": "output.docx"}
 ]"#,
     ),
     (
         "report",
         r#"[
-  {
-    "cmd": "document",
-    "action": "new",
-    "path": "report.docx"
-  },
-  {
-    "cmd": "heading",
-    "action": "add",
-    "text": "Quarterly Report",
-    "level": 1
-  },
-  {
-    "cmd": "heading",
-    "action": "add",
-    "text": "Summary",
-    "level": 2
-  },
-  {
-    "cmd": "paragraph",
-    "action": "add",
-    "text": "This report summarizes Q4 performance."
-  },
-  {
-    "cmd": "paragraph",
-    "action": "add",
-    "text": "Revenue grew 15% year over year."
-  },
-  {
-    "cmd": "document",
-    "action": "save",
-    "path": "report.docx"
-  }
+  {"cmd": "document", "action": "new", "path": "report.docx"},
+  {"cmd": "heading", "action": "add", "text": "Quarterly Report", "level": 1},
+  {"cmd": "heading", "action": "add", "text": "Summary", "level": 2},
+  {"cmd": "paragraph", "action": "add", "text": "This report summarizes Q4 performance."},
+  {"cmd": "paragraph", "action": "add", "text": "Revenue grew 15% year over year."},
+  {"cmd": "document", "action": "save", "path": "report.docx"}
 ]"#,
     ),
     (
         "data_table",
         r#"[
-  {
-    "cmd": "document",
-    "action": "new",
-    "path": "data.docx"
-  },
-  {
-    "cmd": "heading",
-    "action": "add",
-    "text": "Sales Data",
-    "level": 1
-  },
-  {
-    "cmd": "table",
-    "action": "add",
-    "rows": 4,
-    "cols": 3,
-    "id": "sales"
-  },
-  {
-    "cmd": "table",
-    "action": "set-range",
-    "id": "sales",
-    "header": true,
-    "values": [
-      ["Product", "Q1", "Q2"],
-      ["Widget A", 15000, 18000],
-      ["Widget B", 12000, 14500],
-      ["Total", 27000, 32500]
-    ]
-  },
-  {
-    "cmd": "document",
-    "action": "save",
-    "path": "data.docx"
-  }
+  {"cmd": "document", "action": "new", "path": "data.docx"},
+  {"cmd": "heading", "action": "add", "text": "Sales Data", "level": 1},
+  {"cmd": "table", "action": "add", "rows": 4, "cols": 3, "id": "sales"},
+  {"cmd": "table", "action": "set-range", "id": "sales", "header": true, "values": [
+    ["Product", "Q1", "Q2"],
+    ["Widget A", 15000, 18000],
+    ["Widget B", 12000, 14500],
+    ["Total", 27000, 32500]
+  ]},
+  {"cmd": "document", "action": "save", "path": "data.docx"}
 ]"#,
     ),
 ];
@@ -219,12 +152,13 @@ pub fn template(_ctx: &crate::core::Ctx, args: &TemplateArgs) -> Result<Data, Po
             args.name
         )));
     };
-    std::fs::write(&args.output, body)
+    let script: Value = serde_json::from_str(body)
+        .map_err(|e| PoetError::Internal(format!("built-in template is invalid JSON: {e}")))?;
+    let count = script.as_array().map(Vec::len).unwrap_or(0);
+    let rendered = serde_json::to_string_pretty(&script)
+        .map_err(|e| PoetError::Internal(format!("cannot serialize template: {e}")))?;
+    std::fs::write(&args.output, rendered)
         .map_err(|e| PoetError::Validation(format!("Failed to write template: {e}")))?;
-    let count = serde_json::from_str::<Value>(body)
-        .ok()
-        .and_then(|v| v.as_array().map(Vec::len))
-        .unwrap_or(0);
     Ok(Data::BatchTemplate {
         template: args.name.clone(),
         output: args.output.clone(),
@@ -1200,6 +1134,13 @@ mod tests {
             let written = std::fs::read_to_string(&output).expect("file");
             assert!(!written.ends_with('\n'), "no trailing newline");
             assert!(written.starts_with('['));
+            if name == "basic" {
+                // json.dump(indent=2) expansion, byte-for-byte.
+                assert_eq!(
+                    written,
+                    "[\n  {\n    \"cmd\": \"document\",\n    \"action\": \"new\",\n    \"path\": \"output.docx\"\n  },\n  {\n    \"cmd\": \"heading\",\n    \"action\": \"add\",\n    \"text\": \"My Document\",\n    \"level\": 1\n  },\n  {\n    \"cmd\": \"paragraph\",\n    \"action\": \"add\",\n    \"text\": \"Hello World.\"\n  },\n  {\n    \"cmd\": \"document\",\n    \"action\": \"save\",\n    \"path\": \"output.docx\"\n  }\n]"
+                );
+            }
         }
         let err = template(
             &ctx,
