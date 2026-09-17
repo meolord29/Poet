@@ -11,8 +11,9 @@ docx-rs' reader restores `w:instrText` as `RunChild::InstrTextString`, but its
 writer maps that variant to `unreachable!()` (`documents/elements/run.rs`) — a
 document with a TOC field becomes **unsaveable** after one round trip.
 `DocumentManager::save` therefore walks every run (body, tables, nested
-tables) converting `InstrTextString` back into `InstrText` before packing.
-Pinned by a save→reopen→save fidelity probe.
+tables, and — since phase 3 — header/footer parts of every section, where
+`page page-numbers` parks a PAGE field) converting `InstrTextString` back into
+`InstrText` before packing. Pinned by a save→reopen→save fidelity probe.
 
 ## 2. Section breaks are paragraphs with embedded `sectPr`
 
@@ -51,6 +52,6 @@ resolved names so Words' consumers keep working. Writes use canonical ids.
   reprs (`"NEW_PAGE (2)"`, `"None"`).
 - `heading add/set-level` validate `1..=9`; Words passed level 0 through to
   python-docx's `Title` style. The CLI documents 1–9.
-- `paragraph add/insert --style` applies the style id without validating it
-  against a style registry (Words raised `KeyError` for unknown names); real
-  validation arrives with the phase-3 style commands.
+- `paragraph add/insert --style` originally applied the style id without
+  validation; since phase 3 (adr/0010) all `--style` arguments validate
+  against the registry via `resolve_style_id`.

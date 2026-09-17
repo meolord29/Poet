@@ -14,3 +14,7 @@ pub mod commands;
 pub mod core;
 pub mod howto;
 pub mod models;
+
+/// Re-export of the .docx engine so integration tests (and downstream
+/// tooling) can inspect document internals without a matching version pin.
+pub use docx_rs;

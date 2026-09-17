@@ -68,7 +68,7 @@ fn table_children(children: &[DocumentChild]) -> Vec<usize> {
 }
 
 /// Words' range-message format; Python renders `0..-1` for empty sequences.
-fn range_error(what: &str, index: usize, len: usize) -> PoetError {
+pub(crate) fn range_error(what: &str, index: usize, len: usize) -> PoetError {
     PoetError::NotFound(format!(
         "{what} {index} out of range (0..{})",
         len as i64 - 1
@@ -121,7 +121,7 @@ fn push_run_text(run: &Run, out: &mut String) {
     }
 }
 
-fn run_text(run: &Run) -> String {
+pub(crate) fn run_text(run: &Run) -> String {
     let mut out = String::new();
     push_run_text(run, &mut out);
     out
@@ -172,7 +172,7 @@ fn runs_of(paragraph: &Paragraph) -> Vec<RunInfo> {
 // ---------------------------------------------------------------------
 
 /// id → display-name map from the document's styles part.
-fn style_name_map(docx: &docx_rs::Docx) -> HashMap<String, String> {
+pub(crate) fn style_name_map(docx: &docx_rs::Docx) -> HashMap<String, String> {
     docx.styles
         .styles
         .iter()
@@ -198,7 +198,7 @@ pub fn style_display_name(docx: &docx_rs::Docx, id: Option<&str>) -> Option<Stri
 }
 
 /// Built-in id → name pairs docx-rs documents rely on.
-fn builtin_style_name(id: &str) -> Option<String> {
+pub(crate) fn builtin_style_name(id: &str) -> Option<String> {
     let named: Option<&str> = match id {
         "TableGrid" => Some("Table Grid"),
         "ListParagraph" => Some("List Paragraph"),
@@ -242,7 +242,7 @@ pub fn style_id_from_name(name: &str) -> String {
 // ---------------------------------------------------------------------
 
 /// Resolve a body paragraph to its child index.
-fn resolve_paragraph(
+pub(crate) fn resolve_paragraph(
     docx: &docx_rs::Docx,
     id: Option<&str>,
     index: Option<usize>,
@@ -265,7 +265,7 @@ fn resolve_paragraph(
     ))
 }
 
-fn require_paragraph_mut<'a>(
+pub(crate) fn require_paragraph_mut<'a>(
     docx: &'a mut docx_rs::Docx,
     id: Option<&str>,
     index: Option<usize>,
@@ -283,18 +283,29 @@ fn require_paragraph_mut<'a>(
 // Paragraph operations
 // ---------------------------------------------------------------------
 
-fn build_paragraph(text: &str, style: Option<&str>, page_break: bool) -> Paragraph {
+fn build_paragraph(text: &str, style_id: Option<&str>, page_break: bool) -> Paragraph {
     let mut paragraph = Paragraph::new();
     if !text.is_empty() {
         paragraph = paragraph.add_run(Run::new().add_text(text));
     }
-    if let Some(style) = style {
-        paragraph = paragraph.style(&style_id_from_name(style));
+    if let Some(style_id) = style_id {
+        paragraph = paragraph.style(style_id);
     }
     if page_break {
         paragraph = paragraph.page_break_before(true);
     }
     paragraph
+}
+
+/// Validate a CLI style name against the registry and produce the style id
+/// (adr/0010 — closes the adr/0008 deviation for `--style` arguments).
+fn resolve_cli_style(
+    docx: &docx_rs::Docx,
+    style: Option<&str>,
+) -> Result<Option<String>, PoetError> {
+    style
+        .map(|name| crate::core::design::resolve_style_id(docx, name))
+        .transpose()
 }
 
 /// Bookmark-wrap a freshly inserted paragraph at child position `at`
@@ -319,7 +330,8 @@ pub fn add_paragraph(
     id: Option<&str>,
     page_break: bool,
 ) -> Result<String, PoetError> {
-    let paragraph = build_paragraph(text, style, page_break);
+    let style_id = resolve_cli_style(docx, style)?;
+    let paragraph = build_paragraph(text, style_id.as_deref(), page_break);
     let at = docx.document.children.len();
     wrap_new_paragraph(docx, paragraph, at, id, "p")
 }
@@ -340,7 +352,8 @@ pub fn insert_paragraph(
         return add_paragraph(docx, text, style, id, page_break);
     }
     let mut at = paras[index];
-    let paragraph = build_paragraph(text, style, page_break);
+    let style_id = resolve_cli_style(docx, style)?;
+    let paragraph = build_paragraph(text, style_id.as_deref(), page_break);
     let children = &mut docx.document.children;
     children.insert(at, DocumentChild::Paragraph(Box::new(paragraph)));
     if at > 0 && matches!(children.get(at - 1), Some(DocumentChild::BookmarkStart(_))) {
@@ -638,7 +651,7 @@ fn cell_paragraph_texts(cell: &TableCell) -> Vec<String> {
 }
 
 /// Resolve a cell by table index + row + col (0-based, adr/0006).
-fn resolve_cell(
+pub(crate) fn resolve_cell(
     docx: &mut docx_rs::Docx,
     table_index: Option<usize>,
     row: Option<usize>,
@@ -919,6 +932,8 @@ pub fn set_list_level(
 // ---------------------------------------------------------------------
 
 /// `add_run` — append a run (with any given formatting) to a paragraph.
+/// Formatting flows through the shared phase-3 helper so `add`, `format`
+/// and `emphasize` share one mapping (adr/0009).
 #[allow(clippy::too_many_arguments)]
 pub fn add_run(
     docx: &mut docx_rs::Docx,
@@ -934,32 +949,15 @@ pub fn add_run(
 ) -> Result<(), PoetError> {
     let paragraph = require_paragraph_mut(docx, id, index)?;
     let mut run = Run::new().add_text(text);
-    if let Some(on) = bold {
-        run.run_property.bold = Some(if on {
-            docx_rs::Bold::new()
-        } else {
-            docx_rs::Bold::new().disable()
-        });
-    }
-    if let Some(on) = italic {
-        run.run_property.italic = Some(if on {
-            docx_rs::Italic::new()
-        } else {
-            docx_rs::Italic::new().disable()
-        });
-    }
-    if let Some(on) = underline {
-        run = run.underline(if on { "single" } else { "none" });
-    }
-    if let Some(font) = font {
-        run = run.fonts(docx_rs::RunFonts::new().ascii(font));
-    }
-    if let Some(size) = size {
-        run = run.size((size * 2.0).round() as usize);
-    }
-    if let Some(color) = color {
-        run = run.color(hex_color(color)?);
-    }
+    let spec = crate::core::design::FormatSpec {
+        bold,
+        italic,
+        underline,
+        font: font.map(str::to_string),
+        size,
+        color: color.map(str::to_string),
+    };
+    crate::core::design::apply_to_property(&spec, &mut run.run_property)?;
     paragraph.children.push(ParagraphChild::Run(Box::new(run)));
     Ok(())
 }
@@ -1020,7 +1018,7 @@ pub fn clear_runs(
 
 /// Words' `_hex_to_rgb`: strip `#`, expand 3-digit form, uppercase (the
 /// python-docx `RGBColor` rendering). Non-hex input is rejected.
-fn hex_color(color: &str) -> Result<String, PoetError> {
+pub(crate) fn hex_color(color: &str) -> Result<String, PoetError> {
     let stripped = color.strip_prefix('#').unwrap_or(color);
     let expanded: String = if stripped.len() == 3 {
         stripped.chars().flat_map(|ch| [ch, ch]).collect()
@@ -1749,6 +1747,61 @@ pub fn add_toc(
 /// unsaveable after one round trip.
 pub fn normalize_field_texts(docx: &mut docx_rs::Docx) {
     normalize_in_children(&mut docx.document.children);
+    // Header/footer parts carry fields too (`page page-numbers` puts a PAGE
+    // field in the footer — adr/0011); the reader restores their instrText
+    // as the writer-unsafe InstrTextString, so every section's parts must be
+    // normalized as well.
+    for child in &mut docx.document.children {
+        if let DocumentChild::Paragraph(p) = child
+            && let Some(property) = p.property.section_property.as_mut()
+        {
+            normalize_section_parts(property);
+        }
+    }
+    normalize_section_parts(&mut docx.document.section_property);
+}
+
+fn normalize_section_parts(property: &mut docx_rs::SectionProperty) {
+    for (_, part) in [
+        property.header.as_mut(),
+        property.first_header.as_mut(),
+        property.even_header.as_mut(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        normalize_in_header_part(&mut part.children);
+    }
+    for (_, part) in [
+        property.footer.as_mut(),
+        property.first_footer.as_mut(),
+        property.even_footer.as_mut(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        normalize_in_footer_part(&mut part.children);
+    }
+}
+
+fn normalize_in_header_part(children: &mut [docx_rs::HeaderChild]) {
+    for child in children {
+        match child {
+            docx_rs::HeaderChild::Paragraph(p) => normalize_in_paragraph(p),
+            docx_rs::HeaderChild::Table(t) => normalize_in_table(&mut t.rows),
+            docx_rs::HeaderChild::StructuredDataTag(_) => {}
+        }
+    }
+}
+
+fn normalize_in_footer_part(children: &mut [docx_rs::FooterChild]) {
+    for child in children {
+        match child {
+            docx_rs::FooterChild::Paragraph(p) => normalize_in_paragraph(p),
+            docx_rs::FooterChild::Table(t) => normalize_in_table(&mut t.rows),
+            docx_rs::FooterChild::StructuredDataTag(_) => {}
+        }
+    }
 }
 
 fn normalize_in_children(children: &mut [DocumentChild]) {

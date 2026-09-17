@@ -3,7 +3,6 @@
 
 use clap::Args;
 
-use crate::commands::stub_actions;
 use crate::core::Ctx;
 use crate::core::error::PoetError;
 use crate::core::output::Data;
@@ -168,11 +167,6 @@ pub enum RunAction {
     Emphasize(EmphasizeArgs),
 }
 
-stub_actions! {
-    format => FormatArgs,
-    emphasize => EmphasizeArgs,
-}
-
 /// Resolve the `--flag`/`--no-flag` pair into Words' tri-state: `None` when
 /// neither given, `Some(false)` wins when both are given (documented in the
 /// [`FormatFlags`] doc; clap `overrides_with` enforces the precedence).
@@ -186,22 +180,37 @@ fn tri(bold: bool, no_bold: bool) -> Option<bool> {
     }
 }
 
+/// The `FormatFlags` args as a validated [`FormatSpec`].
+fn spec_of(flags: &FormatFlags) -> Result<crate::core::design::FormatSpec, PoetError> {
+    let spec = crate::core::design::FormatSpec {
+        bold: tri(flags.bold, flags.no_bold),
+        italic: tri(flags.italic, flags.no_italic),
+        underline: tri(flags.underline, flags.no_underline),
+        font: flags.font.clone(),
+        size: flags.size,
+        color: flags.color.clone(),
+    };
+    spec.validate()?;
+    Ok(spec)
+}
+
 /// `run add` — append a run with optional formatting to a paragraph.
 pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
     let bold = tri(args.format.bold, args.format.no_bold);
     let italic = tri(args.format.italic, args.format.no_italic);
     let underline = tri(args.format.underline, args.format.no_underline);
+    let spec = spec_of(&args.format)?;
     crate::commands::with_doc(ctx, |mgr| {
         mgr.add_run(
             &args.text,
             args.id.as_deref(),
             args.index,
-            bold,
-            italic,
-            underline,
-            args.format.font.as_deref(),
-            args.format.size,
-            args.format.color.as_deref(),
+            spec.bold,
+            spec.italic,
+            spec.underline,
+            spec.font.as_deref(),
+            spec.size,
+            spec.color.as_deref(),
         )
     })?;
     Ok(Data::RunAdded {
@@ -251,6 +260,74 @@ pub fn clear(ctx: &Ctx, args: &ClearArgs) -> Result<Data, PoetError> {
         id: args.address.id.clone(),
         index: args.address.index,
         message: "Runs cleared".into(),
+    })
+}
+
+/// `run format` — apply formatting flags to every run of the target
+/// paragraph, or only `--run-index`. Empty flag sets are rejected before
+/// the paragraph is resolved (Words run.py:65-66 order).
+pub fn format(ctx: &Ctx, args: &FormatArgs) -> Result<Data, PoetError> {
+    let spec = spec_of(&args.format)?;
+    if spec.is_empty() {
+        return Err(PoetError::Validation(
+            "No formatting options provided".into(),
+        ));
+    }
+    crate::commands::with_doc(ctx, |mgr| {
+        mgr.run_format(
+            args.address.id.as_deref(),
+            args.address.index,
+            &spec,
+            args.run_index,
+        )
+    })?;
+    Ok(Data::RunFormatted {
+        id: args.address.id.clone(),
+        index: args.address.index,
+        run_index: args.run_index,
+        applied: crate::models::data::AppliedFormat::from_spec(&spec),
+        message: "Run formatting applied".into(),
+    })
+}
+
+/// `run emphasize` — apply formatting to occurrences of a substring in a
+/// body paragraph or cell paragraph(s). Guards mirror Words dm.py:474-477:
+/// empty flag set, then empty find string, both before target resolution.
+pub fn emphasize(ctx: &Ctx, args: &EmphasizeArgs) -> Result<Data, PoetError> {
+    let spec = spec_of(&args.format)?;
+    if spec.is_empty() {
+        return Err(PoetError::Validation(
+            "No formatting options provided".into(),
+        ));
+    }
+    if args.find.is_empty() {
+        return Err(PoetError::Validation(
+            "find string must be non-empty".into(),
+        ));
+    }
+    let replacements = crate::commands::with_doc(ctx, |mgr| {
+        mgr.emphasize(
+            &args.find,
+            &spec,
+            args.all,
+            args.id.as_deref(),
+            args.index,
+            args.table,
+            args.row,
+            args.col,
+            args.para,
+        )
+    })?;
+    Ok(Data::RunEmphasized {
+        id: args.id.clone(),
+        index: args.index,
+        table: args.table,
+        row: args.row,
+        col: args.col,
+        para: args.para,
+        find: args.find.clone(),
+        replacements,
+        message: format!("Emphasized {replacements} occurrence(s)"),
     })
 }
 
@@ -413,5 +490,157 @@ mod tests {
         )
         .expect_err("unknown id");
         assert!(matches!(err, PoetError::NotFound(_)));
+    }
+
+    fn no_flags() -> FormatFlags {
+        FormatFlags {
+            bold: false,
+            no_bold: false,
+            italic: false,
+            no_italic: false,
+            underline: false,
+            no_underline: false,
+            font: None,
+            size: None,
+            color: None,
+        }
+    }
+
+    #[test]
+    fn run_format_requires_flags_before_resolution() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        // No flags at all — checked before the (missing) paragraph resolves.
+        let err = format(
+            &ctx,
+            &FormatArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: None,
+                },
+                format: no_flags(),
+                run_index: None,
+            },
+        )
+        .expect_err("no flags");
+        assert!(
+            matches!(err, PoetError::Validation(ref m) if m == "No formatting options provided")
+        );
+    }
+
+    #[test]
+    fn run_format_and_emphasize_envelopes_match_words() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_paragraph(&ctx, "the quick fox");
+        let (json, err) = render(&format(
+            &ctx,
+            &FormatArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+                format: FormatFlags {
+                    bold: true,
+                    ..no_flags()
+                },
+                run_index: None,
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"message\": \"Run formatting applied\""));
+        assert!(json.contains("\"applied\""));
+        assert!(json.contains("\"bold\": true"));
+        assert!(json.contains("\"run_index\": null"));
+
+        let (json, err) = render(&emphasize(
+            &ctx,
+            &EmphasizeArgs {
+                find: "quick".into(),
+                id: None,
+                index: Some(0),
+                table: None,
+                row: None,
+                col: None,
+                para: None,
+                format: FormatFlags {
+                    underline: true,
+                    ..no_flags()
+                },
+                all: false,
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"find\": \"quick\""));
+        assert!(json.contains("\"replacements\": 1"));
+        assert!(json.contains("\"message\": \"Emphasized 1 occurrence(s)\""));
+
+        // No-match emphasize is a successful zero (Words dm.py:394).
+        let (json, err) = render(&emphasize(
+            &ctx,
+            &EmphasizeArgs {
+                find: "zebra".into(),
+                id: None,
+                index: Some(0),
+                table: None,
+                row: None,
+                col: None,
+                para: None,
+                format: FormatFlags {
+                    bold: true,
+                    ..no_flags()
+                },
+                all: false,
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"replacements\": 0"));
+    }
+
+    #[test]
+    fn run_emphasize_rejects_empty_find_and_flags() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_paragraph(&ctx, "text");
+        let err = emphasize(
+            &ctx,
+            &EmphasizeArgs {
+                find: String::new(),
+                id: None,
+                index: Some(0),
+                table: None,
+                row: None,
+                col: None,
+                para: None,
+                format: FormatFlags {
+                    bold: true,
+                    ..no_flags()
+                },
+                all: false,
+            },
+        )
+        .expect_err("empty find");
+        assert!(
+            matches!(err, PoetError::Validation(ref m) if m == "find string must be non-empty")
+        );
+
+        let err = emphasize(
+            &ctx,
+            &EmphasizeArgs {
+                find: "text".into(),
+                id: None,
+                index: Some(0),
+                table: None,
+                row: None,
+                col: None,
+                para: None,
+                format: no_flags(),
+                all: false,
+            },
+        )
+        .expect_err("no flags");
+        assert!(
+            matches!(err, PoetError::Validation(ref m) if m == "No formatting options provided")
+        );
     }
 }
