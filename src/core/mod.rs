@@ -2,12 +2,14 @@
 //! bookmark addressing, content operations. Business logic lives here —
 //! never in `commands`.
 
+pub mod annotate;
 pub mod bookmark;
 pub mod content;
 pub mod design;
 pub mod document;
 pub mod error;
 pub mod export;
+pub mod meta;
 pub mod output;
 pub mod session;
 

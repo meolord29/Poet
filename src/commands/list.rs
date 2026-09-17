@@ -66,7 +66,9 @@ pub enum ListAction {
 /// `list add` / `list add-item` — append a numbered/bulleted item.
 pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
     let id = crate::commands::with_doc(ctx, |mgr| {
-        mgr.add_list_item(&args.text, args.ordered, args.level, args.id.as_deref())
+        let id = mgr.add_list_item(&args.text, args.ordered, args.level, args.id.as_deref())?;
+        crate::core::annotate::on_list_add(mgr, &id, &args.text, args.ordered, args.level)?;
+        Ok(id)
     })?;
     Ok(Data::ListItemAdded {
         id,

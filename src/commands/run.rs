@@ -211,6 +211,11 @@ pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
             spec.font.as_deref(),
             spec.size,
             spec.color.as_deref(),
+        )?;
+        crate::core::annotate::on_run_add(
+            mgr,
+            &crate::core::annotate::target_or_index(args.id.as_deref(), args.index),
+            &args.text,
         )
     })?;
     Ok(Data::RunAdded {
@@ -306,7 +311,7 @@ pub fn emphasize(ctx: &Ctx, args: &EmphasizeArgs) -> Result<Data, PoetError> {
         ));
     }
     let replacements = crate::commands::with_doc(ctx, |mgr| {
-        mgr.emphasize(
+        let replacements = mgr.emphasize(
             &args.find,
             &spec,
             args.all,
@@ -316,7 +321,13 @@ pub fn emphasize(ctx: &Ctx, args: &EmphasizeArgs) -> Result<Data, PoetError> {
             args.row,
             args.col,
             args.para,
-        )
+        )?;
+        crate::core::annotate::on_run_add(
+            mgr,
+            &crate::core::annotate::target_or_index(args.id.as_deref(), args.index),
+            &format!("emphasize '{}'", args.find),
+        )?;
+        Ok(replacements)
     })?;
     Ok(Data::RunEmphasized {
         id: args.id.clone(),

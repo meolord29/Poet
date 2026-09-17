@@ -10,6 +10,7 @@
 //! *inside* `data` only, so their [`Data::message`] returns `""`.
 
 use serde::Serialize;
+use serde_json::Value;
 
 /// One success payload per command.
 #[derive(Debug, Clone, Serialize)]
@@ -634,6 +635,60 @@ pub enum Data {
         index: usize,
         /// Human-readable summary (inside data only).
         message: String,
+    },
+
+    /// `meta describe`.
+    MetaDescribe(Value),
+    /// `meta get-document`.
+    MetaDocumentGot {
+        /// Document metadata (`{}` when unset).
+        metadata: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta set-document`.
+    MetaDocumentSet {
+        /// The stored document metadata.
+        metadata: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta get-section`.
+    MetaSectionGot {
+        /// Section name as requested.
+        name: String,
+        /// Section metadata (`{}` when unset).
+        metadata: Value,
+    },
+    /// `meta set-section`.
+    MetaSectionSet {
+        /// Section name as requested.
+        name: String,
+        /// The stored section metadata.
+        metadata: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta get-table`.
+    MetaTableGot {
+        /// Table bookmark id as requested.
+        id: String,
+        /// Table schema (`{}` when unset).
+        schema: Value,
+    },
+    /// `meta set-table`.
+    MetaTableSet {
+        /// Table bookmark id as requested.
+        id: String,
+        /// The stored table schema.
+        schema: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta history`.
+    MetaHistory {
+        /// The newest entries, chronological.
+        history: Vec<crate::core::meta::HistoryEntry>,
     },
 }
 

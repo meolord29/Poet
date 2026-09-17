@@ -76,7 +76,7 @@ pub(crate) fn range_error(what: &str, index: usize, len: usize) -> PoetError {
 }
 
 /// Child index of the block element wrapped by bookmark `name`.
-fn bookmark_block(children: &[DocumentChild], name: &str) -> Option<usize> {
+pub(crate) fn bookmark_block(children: &[DocumentChild], name: &str) -> Option<usize> {
     let start = children
         .iter()
         .position(|c| matches!(c, DocumentChild::BookmarkStart(b) if b.name == name))?;
@@ -87,7 +87,7 @@ fn bookmark_block(children: &[DocumentChild], name: &str) -> Option<usize> {
 }
 
 /// Bookmark name immediately wrapping the element at child `index`, if any.
-fn name_around(children: &[DocumentChild], index: usize) -> Option<String> {
+pub(crate) fn name_around(children: &[DocumentChild], index: usize) -> Option<String> {
     match index.checked_sub(1).and_then(|i| children.get(i)) {
         Some(DocumentChild::BookmarkStart(b)) => Some(b.name.clone()),
         _ => None,
@@ -1062,7 +1062,7 @@ pub fn add_table(
 }
 
 /// Resolve a body table to its child index.
-fn resolve_table(
+pub(crate) fn resolve_table(
     docx: &docx_rs::Docx,
     id: Option<&str>,
     index: Option<usize>,

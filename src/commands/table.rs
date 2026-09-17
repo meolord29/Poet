@@ -142,7 +142,9 @@ fn parse_values(raw: &Option<String>) -> Result<Option<Vec<Value>>, PoetError> {
 /// `table add` — empty rows × cols grid, bookmarked.
 pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
     let id = crate::commands::with_doc(ctx, |mgr| {
-        mgr.add_table(args.rows, args.cols, args.id.as_deref(), &args.style)
+        let id = mgr.add_table(args.rows, args.cols, args.id.as_deref(), &args.style)?;
+        crate::core::annotate::on_table_add(mgr, &id, args.rows, args.cols)?;
+        Ok(id)
     })?;
     Ok(Data::TableAdded {
         id,
@@ -221,6 +223,14 @@ pub fn set_range(ctx: &Ctx, args: &SetRangeArgs) -> Result<Data, PoetError> {
                 )?;
             }
         }
+        if args.header && !rows.is_empty() {
+            // Every row was validated as an array by the write loop above.
+            let typed: Vec<Vec<Value>> = rows
+                .iter()
+                .map(|row| row.as_array().cloned().unwrap_or_default())
+                .collect();
+            annotate_table_data(mgr, args, &typed)?;
+        }
         Ok(())
     })?;
     Ok(Data::TableRangeSet {
@@ -230,6 +240,25 @@ pub fn set_range(ctx: &Ctx, args: &SetRangeArgs) -> Result<Data, PoetError> {
         header: args.header,
         message: "Table range set".into(),
     })
+}
+
+/// Resolve the `set-range` annotator target: the given id, else the bookmark
+/// wrapping the resolved table, else Words' `index:N` rendering.
+fn annotate_table_data(
+    mgr: &mut crate::core::document::DocumentManager,
+    args: &SetRangeArgs,
+    rows: &[Vec<Value>],
+) -> Result<(), PoetError> {
+    let docx = mgr.docx()?;
+    let at =
+        crate::core::content::resolve_table(docx, args.address.id.as_deref(), args.address.index)?;
+    let target = args
+        .address
+        .id
+        .clone()
+        .or_else(|| crate::core::content::name_around(&docx.document.children, at))
+        .unwrap_or_else(|| crate::core::annotate::target_or_index(None, args.address.index));
+    crate::core::annotate::on_table_data(mgr, &target, rows, true)
 }
 
 /// `table add-row` — optional `--values` JSON array.
