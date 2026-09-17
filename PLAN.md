@@ -51,3 +51,41 @@ Statuses: ☐ pending → ◐ in progress → ☑ done. Update in the merge that
 | [0006](docs/adr/0006-id-allocation-and-addressing.md) | id allocation + element addressing |
 | [0007](docs/adr/0007-table-model-mapping.md) | table model mapping |
 | [0008](docs/adr/0008-engine-gaps.md) | engine gaps: field round-trip, sections, images, style names |
+
+## Handover notes from phase 2 (for phases 3–4)
+
+Engine facts discovered the hard way — do not rediscover them:
+
+- **docx-rs' writer always injects a default decimal numbering** (abstract id 1,
+  `%1.` levels) into `numbering.xml`. After any save→reopen it exists even if Poet
+  never created a list; numbering reuse scans must tolerate it (see
+  `ensure_numbering` in `core/content.rs`).
+- **docx-rs serde keys are camelCase and several fields are private**
+  (`sectionType`, `pageSize`, `pageMargin`, `sz`, …). The established read path is
+  `serde_json::to_value` on the property (adr/0008) — see `section_properties`,
+  `run_info`, `list_tables` in `core/content.rs`. Reuse, don't guess field names.
+- **Field codes**: `RunChild::InstrTextString` is reader-only and the writer maps it
+  to `unreachable!()`. `DocumentManager::save` normalizes it back to `InstrText`
+  before packing — any new code that builds or mutates field runs goes through
+  save, never packs directly.
+- **Sections are paragraph-embedded `sectPr`** (`DocumentChild::Section` cannot
+  express start types — its property is `pub(crate)`). Phase 3 (`page ×7`) must
+  enumerate via `section_properties` in `core/content.rs` and mutate the
+  body-final props through `document.section_property` (pub) or the embedding
+  paragraph's `property.section_property` (pub).
+- **Phase-3 stubs still return `NotImplemented`**: `paragraph border`,
+  `run format`, `run emphasize` — their CLI args are final; only bodies are
+  missing. `emphasize` needs Words' run-splitting algorithm
+  (`_emphasize_in_paragraph`) and reuses `_resolve_targets`-style addressing,
+  already present as `resolve_cell` / cell args.
+- **Style names**: resolve ids via `style_display_name` / write via
+  `style_id_from_name` (builtin table + styles part). `paragraph add --style`
+  does not validate yet (adr/0008 deviation) — the phase-3 style commands are the
+  place to add registry-based validation.
+- **Defaults differ from Words' python-docx template**: Poet documents are A4 with
+  docx-rs margins (not Letter/1″). Accepted under adr/0001; `section info` values
+  reflect it.
+- **Integration-test gotcha**: `app::run_with` takes `Ctx` by value and mutates
+  its own clone — a shared caller `Ctx` does NOT carry an open document across
+  invocations. Chain commands with a fresh `Ctx::at_dir(dir)` per invocation
+  (session auto-open = Words' process chaining), as `tests/phase2_content.rs` does.
