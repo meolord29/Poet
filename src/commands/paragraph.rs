@@ -1,8 +1,14 @@
-//! Paragraph commands (bodies land in phase 2; `border` in phase 3).
+//! Paragraph commands — ported from Words' `commands/paragraph.py` +
+//! `document_manager.py` content methods (adr/0006 addressing). `border`
+//! stays stubbed until phase 3 (its CLI shape is final).
 
 use clap::Args;
 
 use crate::commands::stub_actions;
+use crate::core::Ctx;
+use crate::core::error::PoetError;
+use crate::core::output::Data;
+use crate::models::data::{FindResult, ParagraphInfo};
 
 /// Arguments for `paragraph add`.
 #[derive(Debug, Args)]
@@ -196,16 +202,439 @@ pub enum ParagraphAction {
 }
 
 stub_actions! {
-    add => AddArgs,
-    insert => InsertArgs,
-    get => GetArgs,
-    update => UpdateArgs,
-    delete => DeleteArgs,
-    list => ListArgs,
-    r#move => MoveArgs,
-    clear => ClearArgs,
     border => BorderArgs,
-    find => FindArgs,
-    replace => ReplaceArgs,
-    count => CountArgs,
+}
+
+/// `paragraph add` — append and bookmark a paragraph.
+pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
+    let id = crate::commands::with_doc(ctx, |mgr| {
+        mgr.add_paragraph(
+            &args.text,
+            args.style.as_deref(),
+            args.id.as_deref(),
+            args.page_break,
+        )
+    })?;
+    Ok(Data::ParagraphAdded {
+        id,
+        text: args.text.clone(),
+        style: args.style.clone(),
+        page_break: args.page_break,
+        message: "Paragraph added".into(),
+    })
+}
+
+/// `paragraph insert` — insert before the paragraph at `index`.
+pub fn insert(ctx: &Ctx, args: &InsertArgs) -> Result<Data, PoetError> {
+    let id = crate::commands::with_doc(ctx, |mgr| {
+        mgr.insert_paragraph(
+            args.index,
+            &args.text,
+            args.style.as_deref(),
+            args.id.as_deref(),
+            args.page_break,
+        )
+    })?;
+    Ok(Data::ParagraphInserted {
+        id,
+        index: args.index,
+        text: args.text.clone(),
+        style: args.style.clone(),
+        page_break: args.page_break,
+        message: "Paragraph inserted".into(),
+    })
+}
+
+/// `paragraph get` — body paragraph text, or cell paragraph text(s) with
+/// `--table` addressing.
+pub fn get(ctx: &Ctx, args: &GetArgs) -> Result<Data, PoetError> {
+    if let Some(table) = args.cell.table {
+        let text = crate::commands::with_doc(ctx, |mgr| {
+            mgr.get_cell_paragraph_text(Some(table), args.cell.row, args.cell.col, args.cell.para)
+        })?;
+        return Ok(Data::ParagraphGotCell {
+            table,
+            row: args.cell.row.unwrap_or(0),
+            col: args.cell.col.unwrap_or(0),
+            para: args.cell.para,
+            text,
+        });
+    }
+    let text = crate::commands::with_doc(ctx, |mgr| {
+        mgr.get_paragraph_text(args.address.id.as_deref(), args.address.index)
+    })?;
+    Ok(Data::ParagraphGot {
+        id: args.address.id.clone(),
+        index: args.address.index,
+        text,
+    })
+}
+
+/// `paragraph update` — replace the paragraph's runs.
+pub fn update(ctx: &Ctx, args: &UpdateArgs) -> Result<Data, PoetError> {
+    crate::commands::with_doc(ctx, |mgr| {
+        mgr.update_paragraph(&args.text, args.address.id.as_deref(), args.address.index)
+    })?;
+    Ok(Data::ParagraphUpdated {
+        id: args.address.id.clone(),
+        index: args.address.index,
+        text: args.text.clone(),
+        message: "Paragraph updated".into(),
+    })
+}
+
+/// `paragraph delete` — body paragraph, or cell paragraph with `--table`.
+pub fn delete(ctx: &Ctx, args: &DeleteArgs) -> Result<Data, PoetError> {
+    if let Some(table) = args.cell.table {
+        let para = args.cell.para.unwrap_or(0);
+        crate::commands::with_doc(ctx, |mgr| {
+            mgr.delete_cell_paragraph(Some(table), args.cell.row, args.cell.col, args.cell.para)
+        })?;
+        return Ok(Data::CellParagraphDeleted {
+            table,
+            row: args.cell.row.unwrap_or(0),
+            col: args.cell.col.unwrap_or(0),
+            para,
+            message: "Cell paragraph deleted".into(),
+        });
+    }
+    crate::commands::with_doc(ctx, |mgr| {
+        mgr.delete_paragraph(args.address.id.as_deref(), args.address.index)
+    })?;
+    Ok(Data::ParagraphDeleted {
+        id: args.address.id.clone(),
+        index: args.address.index,
+        message: "Paragraph deleted".into(),
+    })
+}
+
+/// `paragraph list`.
+pub fn list(ctx: &Ctx, _args: &ListArgs) -> Result<Data, PoetError> {
+    let paragraphs: Vec<ParagraphInfo> =
+        crate::commands::with_doc(ctx, |mgr| mgr.list_paragraphs())?;
+    Ok(Data::ParagraphList { paragraphs })
+}
+
+/// `paragraph move` — up (default) or down.
+pub fn r#move(ctx: &Ctx, args: &MoveArgs) -> Result<Data, PoetError> {
+    let index = crate::commands::with_doc(ctx, |mgr| {
+        mgr.move_paragraph(
+            &args.direction,
+            args.address.id.as_deref(),
+            args.address.index,
+        )
+    })?;
+    Ok(Data::ParagraphMoved {
+        id: args.address.id.clone(),
+        index,
+        direction: args.direction.clone(),
+        message: format!("Paragraph moved {}", args.direction),
+    })
+}
+
+/// `paragraph clear` — empty the paragraph's runs.
+pub fn clear(ctx: &Ctx, args: &ClearArgs) -> Result<Data, PoetError> {
+    crate::commands::with_doc(ctx, |mgr| {
+        mgr.clear_paragraph(args.address.id.as_deref(), args.address.index)
+    })?;
+    Ok(Data::ParagraphCleared {
+        id: args.address.id.clone(),
+        index: args.address.index,
+        message: "Paragraph cleared".into(),
+    })
+}
+
+/// `paragraph find` — case-insensitive across paragraphs and cells.
+pub fn find(ctx: &Ctx, args: &FindArgs) -> Result<Data, PoetError> {
+    let results: Vec<FindResult> = crate::commands::with_doc(ctx, |mgr| mgr.find_text(&args.text))?;
+    let count = results.len();
+    Ok(Data::ParagraphFound {
+        text: args.text.clone(),
+        results,
+        count,
+        message: "Search completed".into(),
+    })
+}
+
+/// `paragraph replace` — across paragraphs and cells.
+pub fn replace(ctx: &Ctx, args: &ReplaceArgs) -> Result<Data, PoetError> {
+    let count = crate::commands::with_doc(ctx, |mgr| mgr.replace_text(&args.find, &args.replace))?;
+    Ok(Data::ParagraphReplaced {
+        find: args.find.clone(),
+        replace: args.replace.clone(),
+        count,
+        message: "Replace completed".into(),
+    })
+}
+
+/// `paragraph count`.
+pub fn count(ctx: &Ctx, _args: &CountArgs) -> Result<Data, PoetError> {
+    let count = crate::commands::with_doc(ctx, |mgr| mgr.paragraph_count())?;
+    Ok(Data::ParagraphCount { count })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::commands::testutil::setup;
+    use crate::core::output::render;
+
+    use super::*;
+
+    fn open_doc(ctx: &Ctx, _dir: &std::path::Path) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn add_returns_words_payload_with_empty_envelope_message() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx, &dir);
+        let (json, err) = render(&add(
+            &ctx,
+            &AddArgs {
+                text: "hello".into(),
+                style: None,
+                id: Some("intro".into()),
+                page_break: false,
+            },
+        ));
+        assert!(!err);
+        // Envelope message stays empty; the message lives inside data (Words).
+        assert!(json.contains("\"status\": \"ok\""));
+        assert!(json.contains("\"message\": \"\""));
+        assert!(json.contains("\"id\": \"intro\""));
+        assert!(json.contains("\"message\": \"Paragraph added\""));
+        assert!(json.contains("\"page_break\": false"));
+    }
+
+    #[test]
+    fn get_update_clear_delete_flow_by_id_and_index() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx, &dir);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "v1".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("add");
+        let (json, err) = render(&get(
+            &ctx,
+            &GetArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"text\": \"v1\""));
+        update(
+            &ctx,
+            &UpdateArgs {
+                text: "v2".into(),
+                address: AddressArgs {
+                    id: Some("p1".into()),
+                    index: None,
+                },
+            },
+        )
+        .expect("update");
+        let (json, _) = render(&get(
+            &ctx,
+            &GetArgs {
+                address: AddressArgs {
+                    id: Some("p1".into()),
+                    index: None,
+                },
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        ));
+        assert!(json.contains("v2"));
+        clear(
+            &ctx,
+            &ClearArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+            },
+        )
+        .expect("clear");
+        let (_, err) = render(&delete(
+            &ctx,
+            &DeleteArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        ));
+        assert!(!err);
+        let (_, err) = render(&get(
+            &ctx,
+            &GetArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        ));
+        assert!(err, "deleted paragraph no longer resolves");
+    }
+
+    #[test]
+    fn get_cell_mode_returns_cell_text() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx, &dir);
+        crate::commands::table::add(
+            &ctx,
+            &crate::commands::table::AddArgs {
+                rows: 1,
+                cols: 1,
+                id: None,
+                style: "Table Grid".into(),
+            },
+        )
+        .expect("table");
+        crate::commands::table::set_cell(
+            &ctx,
+            &crate::commands::table::SetCellArgs {
+                row: 0,
+                col: 0,
+                value: "cell txt".into(),
+                address: crate::commands::table::AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+            },
+        )
+        .expect("cell");
+        let (json, err) = render(&get(
+            &ctx,
+            &GetArgs {
+                address: AddressArgs {
+                    id: None,
+                    index: None,
+                },
+                cell: CellArgs {
+                    table: Some(0),
+                    row: Some(0),
+                    col: Some(0),
+                    para: Some(0),
+                },
+            },
+        ));
+        assert!(!err);
+        assert!(json.contains("\"cell txt\""));
+        assert!(json.contains("\"table\": 0"));
+    }
+
+    #[test]
+    fn insert_move_find_replace_count_list() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx, &dir);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "alpha".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("add");
+        add(
+            &ctx,
+            &AddArgs {
+                text: "gamma".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("add");
+        let data = insert(
+            &ctx,
+            &InsertArgs {
+                index: 1,
+                text: "beta".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("insert");
+        let (json, _) = render(&Ok(data));
+        assert!(json.contains("Paragraph inserted"));
+        let data = r#move(
+            &ctx,
+            &MoveArgs {
+                direction: "down".into(),
+                address: AddressArgs {
+                    id: None,
+                    index: Some(0),
+                },
+            },
+        )
+        .expect("move");
+        let (json, _) = render(&Ok(data));
+        assert!(json.contains("Paragraph moved down"));
+        assert!(json.contains("\"index\": 1"));
+        let (json, _) = render(&find(
+            &ctx,
+            &FindArgs {
+                text: "ALPHA".into(),
+            },
+        ));
+        assert!(json.contains("Search completed"));
+        assert!(json.contains("\"count\": 1"));
+        let (json, _) = render(&replace(
+            &ctx,
+            &ReplaceArgs {
+                find: "beta".into(),
+                replace: String::new(),
+            },
+        ));
+        assert!(json.contains("Replace completed"));
+        let (json, _) = render(&count(&ctx, &CountArgs {}));
+        assert!(json.contains("\"count\": 3"));
+        let (json, _) = render(&list(&ctx, &ListArgs {}));
+        assert!(json.contains("\"paragraphs\""));
+        assert!(json.contains("\"style\": \"Normal\""));
+    }
+
+    #[test]
+    fn commands_without_open_document_report_state_error() {
+        let (ctx, _dir) = setup();
+        let err = count(&ctx, &CountArgs {}).expect_err("no doc");
+        assert!(matches!(err, PoetError::DocumentState(_)));
+    }
 }

@@ -99,3 +99,18 @@ pub(crate) use stub_actions;
 
 /// Test fixture module (see the module doc for why it is always compiled).
 pub mod testutil;
+
+/// Run `f` with the open document manager, mapping a closed document to the
+/// Words state error ("No document is open").
+pub(crate) fn with_doc<T>(
+    ctx: &crate::core::Ctx,
+    f: impl FnOnce(
+        &mut crate::core::document::DocumentManager,
+    ) -> Result<T, crate::core::error::PoetError>,
+) -> Result<T, crate::core::error::PoetError> {
+    let mut doc = ctx.doc.borrow_mut();
+    let mgr = doc.as_mut().ok_or_else(|| {
+        crate::core::error::PoetError::DocumentState("No document is open".into())
+    })?;
+    f(mgr)
+}
