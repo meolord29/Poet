@@ -1,5 +1,5 @@
-//! Shared command-layer plumbing: category classification, the dispatch
-//! macros for stubbed categories, and the test fixture.
+//! Shared command-layer plumbing: category classification, the shared
+//! document borrow, and the test fixture.
 
 pub mod batch;
 pub mod calc;
@@ -73,29 +73,6 @@ impl Category {
         AUTOSAVE_CATEGORIES.contains(&self)
     }
 }
-
-/// Declare a stubbed command module: a `Subcommand` enum already defined in
-/// the module plus one `pub fn` per action returning `NotImplemented`.
-///
-/// The stub keeps the CLI surface complete while phases 2–4 port the bodies.
-macro_rules! stub_actions {
-    ($($fn_name:ident => $variant:ident),* $(,)?) => {
-        $(
-            #[doc = concat!("Stub until a later phase ports this action's body.")]
-            pub fn $fn_name(
-                _ctx: &crate::core::Ctx,
-                _args: &$variant,
-            ) -> Result<crate::core::output::Data, crate::core::error::PoetError> {
-                Err(crate::core::error::PoetError::NotImplemented(concat!(
-                    stringify!($fn_name),
-                    " (later phase)"
-                ).to_string()))
-            }
-        )*
-    };
-}
-
-pub(crate) use stub_actions;
 
 /// Test fixture module (see the module doc for why it is always compiled).
 pub mod testutil;

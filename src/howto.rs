@@ -1,10 +1,30 @@
-//! Placeholder AI-oriented reference.
+//! The AI-oriented reference (`poet howto`, and no-subcommand output).
 //!
-//! The full howto prompt (role framing, per-category reference, batch format,
-//! calc operators, workflows) is ported rebranded in phase 4 — see
-//! `docs/plans/phase-4-misc.md`.
+//! Ported from Words' `HOWTO_PROMPT` with `words`→`poet` /
+//! `~/.words`→`~/.poet` substitutions, the install section rewritten for
+//! cargo, calc flags corrected to Poet's actual `--id`/`--index`, and the
+//! summary tables aligned to Poet's real command set (adr-adjacent doc
+//! fixes recorded in PLAN.md; structure/coverage identical to Words').
 
 /// The howto text printed by `poet howto` and when no subcommand is given.
-pub const HOWTO: &str = "Poet howto: the full AI-oriented command reference ships in\n\
-                         phase 4 of the rebuild (docs/plans/phase-4-misc.md).\n\
-                         Until then see `poet <category> --help` and PLAN.md.\n";
+pub const HOWTO: &str = include_str!("howto.md");
+
+#[cfg(test)]
+mod tests {
+    use super::HOWTO;
+
+    #[test]
+    fn howto_is_rebranded_and_complete() {
+        assert!(HOWTO.starts_with("# Poet - AI-First Word Document Automation CLI"));
+        assert!(!HOWTO.contains("Words"), "stale CLI name");
+        assert!(!HOWTO.contains("words"), "stale CLI name");
+        assert!(!HOWTO.contains("~/.words"));
+        assert!(!HOWTO.contains("python-docx"));
+        assert!(!HOWTO.contains("--table-id"), "flag drift from Words' docs");
+        assert!(HOWTO.contains("poet batch run script.json"));
+        assert!(HOWTO.contains("calc"));
+        assert!(HOWTO.contains("meta"));
+        assert!(HOWTO.contains("batch"));
+        assert!(!HOWTO.contains("\"filter\""), "phantom transform op");
+    }
+}

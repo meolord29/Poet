@@ -10,6 +10,7 @@
 //! *inside* `data` only, so their [`Data::message`] returns `""`.
 
 use serde::Serialize;
+use serde_json::Value;
 
 /// One success payload per command.
 #[derive(Debug, Clone, Serialize)]
@@ -632,6 +633,151 @@ pub enum Data {
     ImageDeleted {
         /// Image index.
         index: usize,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+
+    /// `meta describe`.
+    MetaDescribe(Value),
+    /// `meta get-document`.
+    MetaDocumentGot {
+        /// Document metadata (`{}` when unset).
+        metadata: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta set-document`.
+    MetaDocumentSet {
+        /// The stored document metadata.
+        metadata: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta get-section`.
+    MetaSectionGot {
+        /// Section name as requested.
+        name: String,
+        /// Section metadata (`{}` when unset).
+        metadata: Value,
+    },
+    /// `meta set-section`.
+    MetaSectionSet {
+        /// Section name as requested.
+        name: String,
+        /// The stored section metadata.
+        metadata: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta get-table`.
+    MetaTableGot {
+        /// Table bookmark id as requested.
+        id: String,
+        /// Table schema (`{}` when unset).
+        schema: Value,
+    },
+    /// `meta set-table`.
+    MetaTableSet {
+        /// Table bookmark id as requested.
+        id: String,
+        /// The stored table schema.
+        schema: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `meta history`.
+    MetaHistory {
+        /// The newest entries, chronological.
+        history: Vec<crate::core::meta::HistoryEntry>,
+    },
+
+    /// `calc read`.
+    CalcRead {
+        /// Path the table was read from.
+        path: String,
+        /// Table bookmark id as requested (or `null`).
+        table_id: Option<String>,
+        /// Table positional index as requested (or `null`).
+        table_index: Option<usize>,
+        /// Data-row count (header excluded).
+        rows: usize,
+        /// Column names.
+        columns: Vec<String>,
+        /// Rows as objects in column order.
+        data: Vec<Value>,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `calc stats`.
+    CalcStats {
+        /// Path the table was read from.
+        path: String,
+        /// Per-column statistics (Words' key set per column).
+        statistics: Value,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `calc aggregate`.
+    CalcAggregate {
+        /// Path the table was read from.
+        path: String,
+        /// Group column.
+        group_by: String,
+        /// Aggregated column.
+        agg_column: String,
+        /// Aggregation function.
+        agg_func: String,
+        /// One object per group: group key + aggregated value.
+        result: Vec<Value>,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `calc filter`.
+    CalcFilter {
+        /// Path the table was read from.
+        path: String,
+        /// Filtered column.
+        column: String,
+        /// Operator.
+        operator: String,
+        /// Comparison value as given.
+        value: String,
+        /// Matching rows as objects.
+        result: Vec<Value>,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `calc transform`.
+    CalcTransform {
+        /// Path the table was read from.
+        path: String,
+        /// The parsed operations (echo).
+        operations: Value,
+        /// Resulting rows as objects.
+        result: Vec<Value>,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+
+    /// `batch run`.
+    BatchRun {
+        /// Script path as given.
+        script: String,
+        /// Attempted command count (including the failed one).
+        commands_executed: usize,
+        /// Per-command envelopes, in execution order.
+        results: Vec<Value>,
+        /// Human-readable summary (inside data only).
+        message: String,
+    },
+    /// `batch template`.
+    BatchTemplate {
+        /// Template name.
+        template: String,
+        /// Output path written.
+        output: String,
+        /// Command count in the template.
+        commands: usize,
         /// Human-readable summary (inside data only).
         message: String,
     },

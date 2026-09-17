@@ -34,6 +34,10 @@ pub struct DocumentManager {
     /// emits epoch placeholders for them, so the original part is carried
     /// across open→save and patched back into the archive (adr/0001).
     core_xml: Option<String>,
+    /// Metadata payload (adr/0012). `None` until a document that has one is
+    /// opened or a mutation creates it; the docx-rs reader drops custom-XML
+    /// parts, so the payload is side-read from and written into the zip.
+    meta: Option<crate::core::meta::MetaPayload>,
 }
 
 impl DocumentManager {
@@ -81,6 +85,7 @@ impl DocumentManager {
         self.docx = Some(docx);
         self.current_path = None;
         self.core_xml = None;
+        self.meta = None;
         Ok(())
     }
 
@@ -100,6 +105,8 @@ impl DocumentManager {
         self.docx = Some(docx);
         self.current_path = Some(file_path.to_path_buf());
         self.core_xml = read_part(file_path, "docProps/core.xml");
+        self.meta = read_part(file_path, crate::core::meta::META_PARTNAME)
+            .map(|blob| crate::core::meta::parse_payload(&blob));
         Ok(())
     }
 
@@ -119,6 +126,10 @@ impl DocumentManager {
         if let Some(xml) = &self.core_xml {
             patch_part(file_path, "docProps/core.xml", xml)?;
         }
+        if let Some(payload) = &self.meta {
+            let xml = crate::core::meta::dump_payload(payload);
+            write_meta_parts(file_path, &xml)?;
+        }
         self.current_path = Some(file_path.to_path_buf());
         Ok(())
     }
@@ -128,6 +139,21 @@ impl DocumentManager {
         self.docx = None;
         self.current_path = None;
         self.core_xml = None;
+        self.meta = None;
+    }
+
+    /// The metadata payload, if this document has one (adr/0012).
+    pub fn meta(&self) -> Option<&crate::core::meta::MetaPayload> {
+        self.meta.as_ref()
+    }
+
+    /// The metadata payload, creating the default payload on first access —
+    /// the manager must have an open document (Words' `_doc` guard).
+    pub fn ensure_meta(&mut self) -> Result<&mut crate::core::meta::MetaPayload, PoetError> {
+        self.docx_mut()?;
+        Ok(self
+            .meta
+            .get_or_insert_with(crate::core::meta::MetaPayload::default))
     }
 
     /// Structure summary (Words' `get_info` shape). Sections: embedded
@@ -542,6 +568,77 @@ fn patch_part(path: &Path, name: &str, content: &str) -> Result<(), PoetError> {
                 .raw_copy_file(entry)
                 .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
         }
+    }
+    writer
+        .finish()
+        .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+    fs::rename(&tmp, path).map_err(|e| PoetError::File(format!("cannot finalize {display}: {e}")))
+}
+
+/// Write the metadata part into a .docx package, replacing or appending the
+/// entry, and repoint docx-rs' always-emitted (dangling) `customXml/item1.xml`
+/// relationship at the metadata part so OPC consumers can discover it
+/// (adr/0012). One repack for both changes.
+fn write_meta_parts(path: &Path, xml: &str) -> Result<(), PoetError> {
+    let display = path.display();
+    let src = fs::File::open(path)
+        .map_err(|e| PoetError::File(format!("cannot reopen {display}: {e}")))?;
+    let mut archive = zip::ZipArchive::new(src)
+        .map_err(|e| PoetError::File(format!("cannot reread {display}: {e}")))?;
+    let rels_name = "word/_rels/document.xml.rels";
+    let rels_from = "../customXml/item1.xml";
+    let rels_to = format!("/{}", crate::core::meta::META_PARTNAME);
+    let tmp = path.with_extension("poet-tmp");
+    let out = fs::File::create(&tmp)
+        .map_err(|e| PoetError::File(format!("cannot write {}: {e}", tmp.display())))?;
+    let mut writer = zip::ZipWriter::new(out);
+    let mut meta_written = false;
+    for index in 0..archive.len() {
+        let entry_name = archive
+            .by_index(index)
+            .map(|f| f.name().to_string())
+            .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+        if entry_name == crate::core::meta::META_PARTNAME {
+            writer
+                .start_file(
+                    crate::core::meta::META_PARTNAME,
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+            std::io::Write::write_all(&mut writer, xml.as_bytes())
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+            meta_written = true;
+        } else if entry_name == rels_name {
+            let mut rels = String::new();
+            archive
+                .by_index(index)
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?
+                .read_to_string(&mut rels)
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+            let patched = rels.replace(rels_from, &rels_to);
+            writer
+                .start_file(rels_name, zip::write::SimpleFileOptions::default())
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+            std::io::Write::write_all(&mut writer, patched.as_bytes())
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+        } else {
+            let entry = archive
+                .by_index(index)
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+            writer
+                .raw_copy_file(entry)
+                .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+        }
+    }
+    if !meta_written {
+        writer
+            .start_file(
+                crate::core::meta::META_PARTNAME,
+                zip::write::SimpleFileOptions::default(),
+            )
+            .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
+        std::io::Write::write_all(&mut writer, xml.as_bytes())
+            .map_err(|e| PoetError::File(format!("cannot repack {display}: {e}")))?;
     }
     writer
         .finish()

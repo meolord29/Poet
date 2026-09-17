@@ -228,12 +228,14 @@ pub fn border(ctx: &Ctx, args: &BorderArgs) -> Result<Data, PoetError> {
 /// `paragraph add` — append and bookmark a paragraph.
 pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
     let id = crate::commands::with_doc(ctx, |mgr| {
-        mgr.add_paragraph(
+        let id = mgr.add_paragraph(
             &args.text,
             args.style.as_deref(),
             args.id.as_deref(),
             args.page_break,
-        )
+        )?;
+        crate::core::annotate::on_paragraph_add(mgr, &id, &args.text, args.style.as_deref())?;
+        Ok(id)
     })?;
     Ok(Data::ParagraphAdded {
         id,
@@ -247,13 +249,15 @@ pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
 /// `paragraph insert` — insert before the paragraph at `index`.
 pub fn insert(ctx: &Ctx, args: &InsertArgs) -> Result<Data, PoetError> {
     let id = crate::commands::with_doc(ctx, |mgr| {
-        mgr.insert_paragraph(
+        let id = mgr.insert_paragraph(
             args.index,
             &args.text,
             args.style.as_deref(),
             args.id.as_deref(),
             args.page_break,
-        )
+        )?;
+        crate::core::annotate::on_paragraph_add(mgr, &id, &args.text, args.style.as_deref())?;
+        Ok(id)
     })?;
     Ok(Data::ParagraphInserted {
         id,
@@ -293,7 +297,12 @@ pub fn get(ctx: &Ctx, args: &GetArgs) -> Result<Data, PoetError> {
 /// `paragraph update` — replace the paragraph's runs.
 pub fn update(ctx: &Ctx, args: &UpdateArgs) -> Result<Data, PoetError> {
     crate::commands::with_doc(ctx, |mgr| {
-        mgr.update_paragraph(&args.text, args.address.id.as_deref(), args.address.index)
+        mgr.update_paragraph(&args.text, args.address.id.as_deref(), args.address.index)?;
+        crate::core::annotate::on_paragraph_set(
+            mgr,
+            &crate::core::annotate::target_or_index(args.address.id.as_deref(), args.address.index),
+            &args.text,
+        )
     })?;
     Ok(Data::ParagraphUpdated {
         id: args.address.id.clone(),

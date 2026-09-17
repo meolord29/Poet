@@ -49,20 +49,29 @@ fn document_lifecycle_round_trip_via_cli() {
 }
 
 #[test]
-fn unimplemented_actions_return_error_envelope_and_exit_1() {
+fn batch_template_cli_smoke() {
+    let (ctx, dir) = setup();
+    let template_path = dir.join("basic.json");
+    let (json, code) = run(
+        &ctx,
+        &[
+            "batch",
+            "template",
+            "basic",
+            &template_path.to_string_lossy(),
+        ],
+    );
+    assert_eq!(code, ExitCode::SUCCESS);
+    assert!(json.contains("Template generated"));
+    assert!(template_path.exists());
+}
+
+#[test]
+fn meta_actions_without_an_open_document_return_state_error() {
     let (ctx, _dir) = setup();
-    // Phase-4 stubs; the phase-3 design commands are ported now.
-    for args in [
-        vec!["batch", "run", "script.json"],
-        vec!["calc", "read", "sheet.xlsx"],
-        vec!["meta", "get-document"],
-    ] {
-        let (json, code) = run(&ctx, &args);
-        assert_eq!(code, ExitCode::FAILURE);
-        assert!(json.contains("\"status\": \"error\""));
-        assert!(json.contains("\"code\": \"not_implemented\""));
-        assert!(json.contains("\"details\": {}"));
-    }
+    let (json, code) = run(&ctx, &["meta", "get-document"]);
+    assert_eq!(code, ExitCode::FAILURE);
+    assert!(json.contains("\"code\": \"document_state\""));
 }
 
 #[test]
@@ -78,7 +87,11 @@ fn no_subcommand_prints_howto_text_and_exits_0() {
     let (ctx, _dir) = setup();
     let (json, code) = run(&ctx, &[]);
     assert_eq!(code, ExitCode::SUCCESS);
-    assert!(json.contains("phase 4"), "placeholder howto until phase 4");
+    assert!(
+        json.contains("# Poet - AI-First Word Document Automation CLI"),
+        "the full rebranded howto ships in phase 4"
+    );
+    assert!(json.contains("poet batch run script.json"));
 }
 
 #[test]

@@ -50,7 +50,9 @@ pub enum HeadingAction {
 /// `heading add` — a Heading{level}-styled paragraph, bookmarked.
 pub fn add(ctx: &Ctx, args: &AddArgs) -> Result<Data, PoetError> {
     let id = crate::commands::with_doc(ctx, |mgr| {
-        mgr.add_heading(&args.text, args.level, args.id.as_deref())
+        let id = mgr.add_heading(&args.text, args.level, args.id.as_deref())?;
+        crate::core::annotate::on_heading_add(mgr, &id, &args.text, args.level)?;
+        Ok(id)
     })?;
     Ok(Data::HeadingAdded {
         id,
