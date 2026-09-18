@@ -395,3 +395,64 @@ mod export_tests {
         assert!(text.contains("lazy text"));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::document::DocumentManager;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    #[test]
+    fn open_loads_an_existing_document_into_the_context() {
+        let (ctx, dir) = setup();
+        let path = dir.join("doc.docx");
+        let mut mgr = DocumentManager::new();
+        mgr.create("docx").expect("create");
+        mgr.save("docx", &path).expect("save");
+        let data = open(
+            &ctx,
+            &OpenArgs {
+                path: path.to_string_lossy().into_owned(),
+            },
+        )
+        .expect("open");
+        let Data::DocumentOpened { path: reported, .. } = data else {
+            panic!("expected DocumentOpened");
+        };
+        assert_eq!(reported, path.to_string_lossy());
+        assert!(ctx.doc.borrow().is_some(), "open must populate the context");
+    }
+
+    #[test]
+    fn close_clears_the_open_document_and_reports_state_afterwards() {
+        let (ctx, _dir) = setup();
+        let mut mgr = DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        let data = close(&ctx, &CloseArgs {}).expect("close");
+        let Data::DocumentClosed { message } = data else {
+            panic!("expected DocumentClosed");
+        };
+        assert!(message.contains("closed"));
+        assert!(ctx.doc.borrow().is_none(), "close must clear the context");
+        // Words' close is tolerant: closing with nothing open still succeeds.
+        close(&ctx, &CloseArgs {}).expect("second close is not an error");
+    }
+
+    #[test]
+    fn info_counts_are_zero_for_a_fresh_document() {
+        let (ctx, _dir) = setup();
+        let mut mgr = DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        let data = info(&ctx, &InfoArgs {}).expect("info");
+        let Data::DocumentInfo(info) = data else {
+            panic!("expected DocumentInfo");
+        };
+        assert_eq!(info.paragraph_count, 0);
+        assert_eq!(info.table_count, 0);
+        assert_eq!(info.section_count, 1);
+    }
+}

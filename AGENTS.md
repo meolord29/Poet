@@ -59,6 +59,29 @@ Lazy about the solution, never about reading.
   `feat(phase2): table set-range with header inference (adr/005)`.
 - PLAN.md's phase tracker is updated in the same merge that completes a phase.
 
+## QA enforcement layers (adr/0015)
+
+Validation is layered, cheapest-fails-fastest (carpenter model):
+
+1. **Compile gates** (`build.rs`): the command set is signature-derived from
+   `src/commands/`, so a new command auto-enrolls. Strict builds require per
+   command: example atom `docs/examples/<category>/<action>.md`, in-module
+   `#[test] fn <action>_…`, an invocation in some `tests/*.rs`, and scenario
+   coverage (`examples/*.md`, ≥3 distinct fns each).
+2. **Contract tests**: every `Data` variant has an example in
+   `src/models/examples.rs` (exhaustive match) rendered through the envelope;
+   error codes/envelopes and `AUTOSAVE_CATEGORIES` are pinned; the real binary
+   is spawned in `tests/bin.rs`; `run()`'s never-panic guarantee has a battery.
+3. **CI**: fmt/clippy/test/doc + `--features dev` guards.
+4. **QA agent** (`.opencode/agents/poet-dev-validate.md`): manual black-box
+   fault-hunt per PR — sandbox-only, source-blind, `howto`+`--help` is the
+   contract, prescribes doc gaps, reports PASS/expected-error/bug. **Surface
+   PRs attach its report; the agent file is updated in the same PR as the
+   surface change.** Never automated in CI (carpenter adr/021 rationale).
+5. **Dev feature** (`--features dev`): `poet dev setup|clean` sandbox
+   lifecycle, `--capture-example` authoring loop, `--dev-home` session
+   isolation. Gates relax under `dev`; `dev` + release is rejected.
+
 ## Build & verify
 
 ```bash

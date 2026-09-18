@@ -539,3 +539,152 @@ mod tests {
         assert!(matches!(err, PoetError::NotFound(_)));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    fn address() -> AddressArgs {
+        AddressArgs {
+            id: Some("t1".into()),
+            index: None,
+        }
+    }
+
+    fn seed_table(ctx: &crate::core::Ctx) {
+        add(
+            ctx,
+            &AddArgs {
+                rows: 2,
+                cols: 2,
+                id: Some("t1".into()),
+                style: "Table Grid".into(),
+            },
+        )
+        .expect("table add");
+    }
+
+    #[test]
+    fn list_reports_the_seeded_table() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_table(&ctx);
+        let data = list(&ctx, &ListArgs {}).expect("table list");
+        let Data::TableList { tables } = data else {
+            panic!("expected TableList");
+        };
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].id.as_deref(), Some("t1"));
+        assert_eq!(tables[0].rows, 2);
+        assert_eq!(tables[0].cols, 2);
+    }
+
+    #[test]
+    fn get_returns_the_cell_grid() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_table(&ctx);
+        set_cell(
+            &ctx,
+            &SetCellArgs {
+                row: 0,
+                col: 0,
+                value: "Header".into(),
+                address: address(),
+            },
+        )
+        .expect("set cell");
+        let data = get(&ctx, &GetArgs { address: address() }).expect("table get");
+        let Data::TableGot {
+            rows,
+            cols,
+            data: grid,
+            ..
+        } = data
+        else {
+            panic!("expected TableGot");
+        };
+        assert_eq!((rows, cols), (2, 2));
+        assert_eq!(grid[0][0], "Header");
+    }
+
+    #[test]
+    fn add_column_appends_and_reports() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_table(&ctx);
+        let data = add_column(
+            &ctx,
+            &AppendArgs {
+                address: address(),
+                values: None,
+            },
+        )
+        .expect("add column");
+        let Data::TableColumnAdded { .. } = data else {
+            panic!("expected TableColumnAdded");
+        };
+        let got = get(&ctx, &GetArgs { address: address() }).expect("table get");
+        let Data::TableGot { cols, .. } = got else {
+            panic!("expected TableGot");
+        };
+        assert_eq!(cols, 3);
+    }
+    #[test]
+    fn delete_row_removes_by_positional_index() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_table(&ctx);
+        let data = delete_row(
+            &ctx,
+            &DeleteRowArgs {
+                row: 1,
+                address: address(),
+            },
+        )
+        .expect("delete row");
+        let Data::TableRowDeleted { row, .. } = data else {
+            panic!("expected TableRowDeleted");
+        };
+        assert_eq!(row, 1);
+        // (seed is the shared 2x2 table — one row remains)
+        let got = get(&ctx, &GetArgs { address: address() }).expect("table get");
+        let Data::TableGot { rows, .. } = got else {
+            panic!("expected TableGot");
+        };
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn delete_column_removes_by_positional_index() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        seed_table(&ctx);
+        let data = delete_column(
+            &ctx,
+            &DeleteColumnArgs {
+                col: 1,
+                address: address(),
+            },
+        )
+        .expect("delete column");
+        let Data::TableColumnDeleted { col, .. } = data else {
+            panic!("expected TableColumnDeleted");
+        };
+        assert_eq!(col, 1);
+        let got = get(&ctx, &GetArgs { address: address() }).expect("table get");
+        let Data::TableGot { cols, .. } = got else {
+            panic!("expected TableGot");
+        };
+        assert_eq!(cols, 1);
+    }
+}

@@ -476,3 +476,139 @@ mod tests {
         assert!(json.contains("\"code\": \"calculation_error\""));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::document::DocumentManager;
+    use std::path::Path;
+
+    use super::*;
+
+    /// Save a doc with a headered 2x2 sales table; return its path.
+    fn table_doc(ctx: &crate::core::Ctx, dir: &Path) -> String {
+        let mut mgr = DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        crate::commands::table::add(
+            ctx,
+            &crate::commands::table::AddArgs {
+                rows: 2,
+                cols: 2,
+                id: Some("sales".into()),
+                style: "Table Grid".into(),
+            },
+        )
+        .expect("table add");
+        crate::commands::table::set_range(
+            ctx,
+            &crate::commands::table::SetRangeArgs {
+                values: r#"[["Region","Q1"],["EMEA",10]]"#.into(),
+                address: crate::commands::table::AddressArgs {
+                    id: Some("sales".into()),
+                    index: None,
+                },
+                header: true,
+            },
+        )
+        .expect("set range");
+        let path = dir.join("calc.docx");
+        crate::commands::document::save(
+            ctx,
+            &crate::commands::document::SaveArgs {
+                path: Some(path.to_string_lossy().into_owned()),
+                format: None,
+            },
+        )
+        .expect("save");
+        path.to_string_lossy().into_owned()
+    }
+
+    fn address() -> AddressArgs {
+        AddressArgs {
+            id: Some("sales".into()),
+            index: None,
+            range: None,
+        }
+    }
+
+    #[test]
+    fn stats_reports_column_statistics() {
+        let (ctx, dir) = setup();
+        let path = table_doc(&ctx, &dir);
+        let data = stats(
+            &ctx,
+            &StatsArgs {
+                path,
+                column: Some("Q1".into()),
+                address: address(),
+            },
+        )
+        .expect("stats");
+        let Data::CalcStats { statistics, .. } = data else {
+            panic!("expected CalcStats");
+        };
+        assert!(statistics["Q1"].is_object(), "{statistics}");
+    }
+
+    #[test]
+    fn aggregate_groups_and_aggregates() {
+        let (ctx, dir) = setup();
+        let path = table_doc(&ctx, &dir);
+        let data = aggregate(
+            &ctx,
+            &AggregateArgs {
+                path,
+                group_by: "Region".into(),
+                agg_column: "Q1".into(),
+                agg_func: "sum".into(),
+                address: address(),
+            },
+        )
+        .expect("aggregate");
+        let Data::CalcAggregate { result, .. } = data else {
+            panic!("expected CalcAggregate");
+        };
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn filter_returns_matching_rows() {
+        let (ctx, dir) = setup();
+        let path = table_doc(&ctx, &dir);
+        let data = filter(
+            &ctx,
+            &FilterArgs {
+                path,
+                column: "Q1".into(),
+                operator: ">".into(),
+                value: "5".into(),
+                address: address(),
+            },
+        )
+        .expect("filter");
+        let Data::CalcFilter { result, .. } = data else {
+            panic!("expected CalcFilter");
+        };
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn transform_applies_operations_and_echoes_them() {
+        let (ctx, dir) = setup();
+        let path = table_doc(&ctx, &dir);
+        let data = transform(
+            &ctx,
+            &TransformArgs {
+                path,
+                operations: r#"[{"type":"sort","by":"Q1","descending":true}]"#.into(),
+                address: address(),
+            },
+        )
+        .expect("transform");
+        let Data::CalcTransform { operations, .. } = data else {
+            panic!("expected CalcTransform");
+        };
+        assert!(operations.is_array());
+    }
+}

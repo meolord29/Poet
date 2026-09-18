@@ -199,3 +199,138 @@ mod tests {
         assert!(matches!(err, PoetError::Validation(_)));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::error::PoetError;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn add_creates_a_numbered_item_when_ordered() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = add(
+            &ctx,
+            &AddArgs {
+                text: "First item".into(),
+                ordered: true,
+                level: 1,
+                id: Some("l1".into()),
+            },
+        )
+        .expect("list add");
+        let Data::ListItemAdded { id, list_type, .. } = data else {
+            panic!("expected ListItemAdded");
+        };
+        assert_eq!(id, "l1");
+        assert_eq!(list_type, "ordered");
+        let err = add(
+            &ctx,
+            &AddArgs {
+                text: "Bad".into(),
+                ordered: false,
+                level: 0,
+                id: None,
+            },
+        )
+        .expect_err("level out of range");
+        assert!(matches!(err, PoetError::Validation(_)));
+    }
+
+    #[test]
+    fn add_item_continues_the_previous_list() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "First item".into(),
+                ordered: false,
+                level: 1,
+                id: None,
+            },
+        )
+        .expect("list add");
+        let data = add_item(
+            &ctx,
+            &AddArgs {
+                text: "Second item".into(),
+                ordered: false,
+                level: 1,
+                id: None,
+            },
+        )
+        .expect("list add-item");
+        let Data::ListItemAdded { text, .. } = data else {
+            panic!("expected ListItemAdded");
+        };
+        assert_eq!(text, "Second item");
+    }
+
+    #[test]
+    fn convert_turns_a_paragraph_into_a_list_item() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Plain text.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = convert(
+            &ctx,
+            &ConvertArgs {
+                ordered: true,
+                id: Some("p1".into()),
+                index: None,
+            },
+        )
+        .expect("convert");
+        let Data::ListConverted { list_type, .. } = data else {
+            panic!("expected ListConverted");
+        };
+        assert_eq!(list_type, "ordered");
+    }
+
+    #[test]
+    fn set_level_re_nests_the_item() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "First item".into(),
+                ordered: false,
+                level: 1,
+                id: Some("l1".into()),
+            },
+        )
+        .expect("list add");
+        let data = set_level(
+            &ctx,
+            &SetLevelArgs {
+                level: 2,
+                id: Some("l1".into()),
+                index: None,
+            },
+        )
+        .expect("set level");
+        let Data::ListLevelSet { level, .. } = data else {
+            panic!("expected ListLevelSet");
+        };
+        assert_eq!(level, 2);
+    }
+}

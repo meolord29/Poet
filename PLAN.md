@@ -57,6 +57,8 @@ Statuses: ☐ pending → ◐ in progress → ☑ done. Update in the merge that
 | [0011](docs/adr/0011-page-section-mapping.md) | page/section mapping, validated inputs, reader gaps |
 | [0012](docs/adr/0012-meta-custom-xml-part.md) | metadata in a custom-XML part, side-read at zip level |
 | [0013](docs/adr/0013-rhai-expression-grammar-and-calc-mapping.md) | calc on polars + rhai expression grammar |
+| [0014](docs/adr/0014-completions-addition.md) | additions over Words: shell completions |
+| [0015](docs/adr/0015-qa-enforcement-layers.md) | QA enforcement layers (carpenter port) |
 
 ## Handover notes from phases 2–4 (maintenance)
 
