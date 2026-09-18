@@ -16,6 +16,12 @@ poet --help
 Requires a stable Rust toolchain to build and nothing at runtime. Poet uses **docx-rs** for
 document operations, **polars** for table analysis, and **rhai** for calc expressions.
 
+## Shell Completions
+
+```bash
+poet completions bash >> ~/.bashrc      # or zsh | fish | powershell | elvish
+```
+
 ## Core Concepts
 
 ### Session Lifecycle
@@ -78,6 +84,32 @@ Every command returns structured JSON:
 {"status": "error", "message": "...", "code": "..."}   // error
 ```
 
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (or raw-text output: `howto`, `completions`) |
+| `1` | The command returned an error envelope |
+| `2` | Clap usage error (unknown command, bad flags — plain text, not JSON) |
+
+### Error Codes
+
+Branch on `code` in error envelopes:
+
+| Code | Meaning |
+|------|---------|
+| `session_error` | Reading/writing `session.json` failed |
+| `validation_error` | Bad input (bad level, bad range, invalid JSON argument, ...) |
+| `metadata_error` | Metadata operation failed |
+| `calculation_error` | Calc/analysis failed (unknown operator, type mismatch, missing column) |
+| `file_error` | File I/O failed (read/pack) |
+| `not_found` | File, bookmark id, or table does not exist |
+| `conflict` | Name already taken or state conflict |
+| `document_state` | Operation requires an open document (or none to be open) |
+| `unsupported` | Engine capability not supported (e.g. pdf export) |
+| `not_implemented` | Reserved for phased rebuilds; unused in release builds |
+| `internal` | Unexpected internal condition (please report) |
+
 ### Multi-Phase Processing Strategy
 
 Since sessions do not persist between CLI calls, split complex document generation into phases.
@@ -119,7 +151,7 @@ poet section page-break                      # insert an explicit page break
 poet paragraph add "Some text."              # -> echoes id (e.g. p1)
 poet paragraph add "Intro" --id intro
 poet paragraph add "Quote" --style "Intense Quote"
-poet paragraph insert --index 0 "Title" --id title
+poet paragraph insert 0 "Title" --id title
 poet paragraph get --id intro
 poet paragraph get --index 3
 poet paragraph update "New text" --id intro
@@ -130,7 +162,12 @@ poet paragraph list
 poet paragraph count
 poet paragraph find "Total"
 poet paragraph replace "Draft" "Final"
+poet paragraph border --id intro --position bottom --color FF0000
 ```
+
+`paragraph border` draws a box edge around a paragraph: `--position top|bottom|left|right`,
+`--color RRGGBB`, `--size` (eighths of a point, default 4), `--space` (gap to text in
+points, default 1), `--style` (e.g. single, double, dashed). Requires `--id` or `--index`.
 
 ## RUNS (run) — inline text spans with formatting
 
@@ -191,7 +228,7 @@ poet list set-level 2 --id l1
 ## TABLES (table)
 
 ```bash
-poet table add --rows 4 --cols 3 --id sales
+poet table add 4 3 --id sales
 poet table list
 poet table get --id sales
 poet table set-cell --id sales --row 0 --col 0 --value "Product"
@@ -408,7 +445,7 @@ poet batch run report.phase2.json
 |----------|-------------|
 | document | new, open, save, close, info, export |
 | section | list, info, add, page-break |
-| paragraph | add, insert, get, update, delete, list, move, clear, find, replace, count |
+| paragraph | add, insert, get, update, delete, list, move, clear, border, find, replace, count |
 | run | add, get, clear, format, emphasize |
 | style | list, apply |
 | heading | add, set-level, list |
