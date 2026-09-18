@@ -106,7 +106,7 @@ fn completions_print_raw_scripts_and_exit_0() {
             "completions are raw text, not a JSON envelope"
         );
     }
-    let (json, code) = run(&ctx, &["completions", "bash"]);
+    let (json, _) = run(&ctx, &["completions", "bash"]);
     assert!(json.contains("poet"), "script should reference the binary");
 }
 
