@@ -1,0 +1,31 @@
+[package]
+name = "poet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+docx-rs = "0.4"
+image = { version = "0.25", default-features = false, features = [
+    "bmp",
+    "gif",
+    "jpeg",
+    "png",
+    "tiff",
+] }
+polars = { version = "0.44", default-features = false, features = [
+    "fmt",
+    "lazy",
+    "regex",
+    "strings",
+] }
+rhai = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+zip = "8"
+
+[dev-dependencies]
+tempfile = "3.27.0"
