@@ -335,3 +335,157 @@ mod tests {
         *ctx.doc.borrow_mut() = Some(mgr);
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn set_document_stores_and_echoes_the_metadata() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = set_document(
+            &ctx,
+            &SetDocumentArgs {
+                metadata: r#"{"title": "Q3"}"#.into(),
+            },
+        )
+        .expect("set document");
+        let Data::MetaDocumentSet { metadata, .. } = data else {
+            panic!("expected MetaDocumentSet");
+        };
+        assert_eq!(metadata["title"], "Q3");
+    }
+
+    #[test]
+    fn get_section_returns_the_stored_section_metadata() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        set_section(
+            &ctx,
+            &SetSectionArgs {
+                name: "Body".into(),
+                metadata: r#"{"purpose": "Main content"}"#.into(),
+            },
+        )
+        .expect("set section");
+        let data = get_section(
+            &ctx,
+            &GetSectionArgs {
+                name: "Body".into(),
+            },
+        )
+        .expect("get section");
+        let Data::MetaSectionGot { name, metadata } = data else {
+            panic!("expected MetaSectionGot");
+        };
+        assert_eq!(name, "Body");
+        assert_eq!(metadata["purpose"], "Main content");
+    }
+
+    #[test]
+    fn set_section_injects_the_name_into_the_stored_value() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = set_section(
+            &ctx,
+            &SetSectionArgs {
+                name: "Body".into(),
+                metadata: "{}".into(),
+            },
+        )
+        .expect("set section");
+        let Data::MetaSectionSet { name, .. } = data else {
+            panic!("expected MetaSectionSet");
+        };
+        assert_eq!(name, "Body");
+    }
+
+    #[test]
+    fn get_table_returns_the_stored_schema() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::table::add(
+            &ctx,
+            &crate::commands::table::AddArgs {
+                rows: 2,
+                cols: 2,
+                id: Some("sales".into()),
+                style: "Table Grid".into(),
+            },
+        )
+        .expect("table add");
+        set_table(
+            &ctx,
+            &SetTableArgs {
+                id: "sales".into(),
+                schema: r#"{"columns": []}"#.into(),
+            },
+        )
+        .expect("set table");
+        let data = get_table(&ctx, &GetTableArgs { id: "sales".into() }).expect("get table");
+        let Data::MetaTableGot { id, schema } = data else {
+            panic!("expected MetaTableGot");
+        };
+        assert_eq!(id, "sales");
+        assert!(schema["columns"].is_array());
+    }
+
+    #[test]
+    fn set_table_stores_the_schema_under_the_table_id() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::table::add(
+            &ctx,
+            &crate::commands::table::AddArgs {
+                rows: 2,
+                cols: 2,
+                id: Some("sales".into()),
+                style: "Table Grid".into(),
+            },
+        )
+        .expect("table add");
+        let data = set_table(
+            &ctx,
+            &SetTableArgs {
+                id: "sales".into(),
+                schema: r#"{"columns": [{"name": "Region", "type": "string"}]}"#.into(),
+            },
+        )
+        .expect("set table");
+        let Data::MetaTableSet { id, .. } = data else {
+            panic!("expected MetaTableSet");
+        };
+        assert_eq!(id, "sales");
+    }
+
+    #[test]
+    fn history_returns_annotated_operations_after_a_mutation() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Historic.".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = history(&ctx, &HistoryArgs { limit: 10 }).expect("history");
+        let Data::MetaHistory { history } = data else {
+            panic!("expected MetaHistory");
+        };
+        assert!(!history.is_empty());
+        assert!(history[0].command.contains("paragraph"));
+    }
+}

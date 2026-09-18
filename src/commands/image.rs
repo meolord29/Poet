@@ -205,3 +205,153 @@ mod tests {
         assert!(matches!(err, PoetError::NotFound(_)));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::models::data::Data;
+    use std::path::Path;
+
+    use super::*;
+
+    /// A minimal valid 1x1 PNG.
+    const PNG_BYTES: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc,
+        0xcf, 0xc0, 0x50, 0x0f, 0x00, 0x04, 0x85, 0x01, 0x80, 0x84, 0xa9, 0x8c, 0x21, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    fn png(dir: &Path) -> String {
+        let path = dir.join("logo.png");
+        std::fs::write(&path, PNG_BYTES).expect("write png");
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn add_embeds_the_image_and_echoes_dimensions() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx);
+        let path = png(&dir);
+        let data = add(
+            &ctx,
+            &AddArgs {
+                path: path.clone(),
+                width: Some(2.0),
+                height: None,
+                id: None,
+            },
+        )
+        .expect("image add");
+        let Data::ImageAdded { id, width, .. } = data else {
+            panic!("expected ImageAdded");
+        };
+        assert!(!id.is_empty());
+        assert_eq!(width, Some(2.0));
+    }
+
+    #[test]
+    fn list_counts_the_embedded_images() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                path: png(&dir),
+                width: None,
+                height: None,
+                id: None,
+            },
+        )
+        .expect("image add");
+        let data = list(&ctx, &ListArgs {}).expect("image list");
+        let Data::ImageList { images, count } = data else {
+            panic!("expected ImageList");
+        };
+        assert_eq!(count, images.len());
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn get_returns_one_image_by_positional_index() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                path: png(&dir),
+                width: None,
+                height: None,
+                id: None,
+            },
+        )
+        .expect("image add");
+        let data = get(&ctx, &GetArgs { index: 0 }).expect("image get");
+        let Data::ImageGot(info) = data else {
+            panic!("expected ImageGot");
+        };
+        assert_eq!(info.index, 0);
+        assert!(info.width > 0);
+    }
+
+    #[test]
+    fn resize_sets_new_dimensions() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                path: png(&dir),
+                width: None,
+                height: None,
+                id: None,
+            },
+        )
+        .expect("image add");
+        let data = resize(
+            &ctx,
+            &ResizeArgs {
+                index: 0,
+                width: Some(3.0),
+                height: None,
+            },
+        )
+        .expect("resize");
+        let Data::ImageResized { width, .. } = data else {
+            panic!("expected ImageResized");
+        };
+        assert_eq!(width, Some(3.0));
+    }
+
+    #[test]
+    fn delete_removes_the_drawing() {
+        let (ctx, dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                path: png(&dir),
+                width: None,
+                height: None,
+                id: None,
+            },
+        )
+        .expect("image add");
+        let data = delete(&ctx, &DeleteArgs { index: 0 }).expect("delete");
+        let Data::ImageDeleted { .. } = data else {
+            panic!("expected ImageDeleted");
+        };
+        let listed = list(&ctx, &ListArgs {}).expect("image list");
+        let Data::ImageList { count, .. } = listed else {
+            panic!("expected ImageList");
+        };
+        assert_eq!(count, 0);
+    }
+}

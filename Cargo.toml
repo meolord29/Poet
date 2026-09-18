@@ -3,6 +3,12 @@ name = "poet"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Dev-build tooling for the QA authoring loop (adr/0015): `poet dev
+# setup|clean`, `--capture-example`, `--dev-home`. Gates relax under `dev`;
+# `build.rs` rejects `dev` + release, so a relaxed binary never ships.
+dev = []
+
 [dependencies]
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
@@ -29,3 +35,6 @@ zip = "8"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[build-dependencies]
+syn = { version = "2", features = ["full"] }

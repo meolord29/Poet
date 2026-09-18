@@ -781,6 +781,25 @@ pub enum Data {
         /// Human-readable summary (inside data only).
         message: String,
     },
+
+    /// `dev setup` (dev builds only, adr/0015) — sandbox present.
+    #[cfg(feature = "dev")]
+    DevSetup {
+        /// Sandbox root directory (cwd-relative).
+        path: String,
+        /// Session home inside the sandbox (`<path>/.poet`) for `--dev-home`.
+        home: String,
+        /// Whether this call created the sandbox (idempotent re-runs: `false`).
+        created: bool,
+    },
+    /// `dev clean` (dev builds only, adr/0015) — sandbox absent.
+    #[cfg(feature = "dev")]
+    DevClean {
+        /// Whether this call removed the sandbox (idempotent re-runs: `false`).
+        removed: bool,
+        /// Sandbox root directory (cwd-relative).
+        path: String,
+    },
 }
 
 impl Data {
@@ -793,6 +812,12 @@ impl Data {
             | Data::DocumentOpened { message, .. }
             | Data::DocumentSaved { message, .. }
             | Data::DocumentClosed { message } => message,
+            // Dev lifecycle commands read best with a message in both places
+            // (they are tooling, not Words surface — adr/0015).
+            #[cfg(feature = "dev")]
+            Data::DevSetup { .. } => "dev sandbox ready",
+            #[cfg(feature = "dev")]
+            Data::DevClean { .. } => "dev sandbox removed",
             _ => "",
         }
     }

@@ -152,3 +152,70 @@ mod tests {
         assert!(matches!(err, PoetError::Validation(ref m) if m.contains("fonts")));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::error::PoetError;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn list_returns_registry_styles_with_type_rendering() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = list(&ctx, &ListArgs { r#type: None }).expect("style list");
+        let Data::StylesListed { styles, count } = data else {
+            panic!("expected StylesListed");
+        };
+        assert_eq!(count, styles.len());
+        assert!(styles.iter().any(|s| s.name == "Table Grid"));
+        assert!(styles.iter().all(|s| s.r#type.contains('(')));
+    }
+
+    #[test]
+    fn apply_reports_the_style_and_rejects_unknown_names() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Styled.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = apply(
+            &ctx,
+            &ApplyArgs {
+                style: "Intense Quote".into(),
+                id: Some("p1".into()),
+                index: None,
+            },
+        )
+        .expect("style apply");
+        let Data::StyleApplied { style, .. } = data else {
+            panic!("expected StyleApplied");
+        };
+        assert_eq!(style, "Intense Quote");
+        let err = apply(
+            &ctx,
+            &ApplyArgs {
+                style: "Bogus".into(),
+                id: Some("p1".into()),
+                index: None,
+            },
+        )
+        .expect_err("unknown style");
+        assert!(matches!(err, PoetError::NotFound(_)));
+    }
+}

@@ -656,3 +656,210 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    fn flags() -> FormatFlags {
+        FormatFlags {
+            bold: false,
+            no_bold: false,
+            italic: false,
+            no_italic: false,
+            underline: false,
+            no_underline: false,
+            font: None,
+            size: None,
+            color: None,
+        }
+    }
+
+    fn address() -> AddressArgs {
+        AddressArgs {
+            id: Some("p1".into()),
+            index: None,
+        }
+    }
+
+    #[test]
+    fn add_appends_a_formatted_run() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Base ".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let mut fmt = flags();
+        fmt.bold = true;
+        let data = add(
+            &ctx,
+            &AddArgs {
+                text: "bold tail".into(),
+                id: Some("p1".into()),
+                index: None,
+                format: fmt,
+            },
+        )
+        .expect("run add");
+        let Data::RunAdded { text, bold, .. } = data else {
+            panic!("expected RunAdded");
+        };
+        assert_eq!(text, "bold tail");
+        assert_eq!(bold, Some(true));
+    }
+
+    #[test]
+    fn get_lists_the_paragraph_runs() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Base ".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = get(
+            &ctx,
+            &GetArgs {
+                address: address(),
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        )
+        .expect("run get");
+        let Data::RunsGot { runs, .. } = data else {
+            panic!("expected RunsGot");
+        };
+        assert!(!runs.is_empty());
+    }
+
+    #[test]
+    fn clear_removes_every_run() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Vanishing.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = clear(&ctx, &ClearArgs { address: address() }).expect("run clear");
+        let Data::RunsCleared { .. } = data else {
+            panic!("expected RunsCleared");
+        };
+        let got = get(
+            &ctx,
+            &GetArgs {
+                address: address(),
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        )
+        .expect("run get after clear");
+        let Data::RunsGot { runs, .. } = got else {
+            panic!("expected RunsGot");
+        };
+        assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn format_reports_only_what_was_applied() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Styled.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let mut fmt = flags();
+        fmt.bold = true;
+        let data = format(
+            &ctx,
+            &FormatArgs {
+                address: address(),
+                format: fmt,
+                run_index: None,
+            },
+        )
+        .expect("run format");
+        let Data::RunFormatted { applied, .. } = data else {
+            panic!("expected RunFormatted");
+        };
+        assert_eq!(applied.bold, Some(true));
+        assert_eq!(applied.italic, None, "untouched options are absent");
+    }
+
+    #[test]
+    fn emphasize_reports_the_replacement_count() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        crate::commands::paragraph::add(
+            &ctx,
+            &crate::commands::paragraph::AddArgs {
+                text: "Say quarter again, quarter.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let mut fmt = flags();
+        fmt.bold = true;
+        let data = emphasize(
+            &ctx,
+            &EmphasizeArgs {
+                find: "quarter".into(),
+                id: Some("p1".into()),
+                index: None,
+                table: None,
+                row: None,
+                col: None,
+                para: None,
+                format: fmt,
+                all: true,
+            },
+        )
+        .expect("emphasize");
+        let Data::RunEmphasized { replacements, .. } = data else {
+            panic!("expected RunEmphasized");
+        };
+        assert_eq!(replacements, 2);
+    }
+}

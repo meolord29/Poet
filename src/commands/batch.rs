@@ -1180,3 +1180,47 @@ mod tests {
         assert_eq!(results[2]["data"]["metadata"]["title"], "T");
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::error::PoetError;
+    use crate::models::data::Data;
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn template_writes_a_script_and_reports_the_command_count() {
+        let (ctx, dir) = setup();
+        let output = dir.join("template.json");
+        let data = template(
+            &ctx,
+            &TemplateArgs {
+                name: "basic".into(),
+                output: output.to_string_lossy().into_owned(),
+            },
+        )
+        .expect("template");
+        let Data::BatchTemplate {
+            template: name_echo,
+            commands,
+            ..
+        } = data
+        else {
+            panic!("expected BatchTemplate");
+        };
+        assert_eq!(name_echo, "basic");
+        assert!(commands > 0);
+        assert!(Path::new(&output).exists(), "template file must be written");
+        let err = template(
+            &ctx,
+            &TemplateArgs {
+                name: "bogus".into(),
+                output: dir.join("nope.json").to_string_lossy().into_owned(),
+            },
+        )
+        .expect_err("unknown template name");
+        assert!(matches!(err, PoetError::Validation(_)));
+    }
+}

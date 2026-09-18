@@ -20,12 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo clippy --all-targets -- -D warnings
+      # The dev feature (adr/0015) must not rot: it is compiled and linted too.
+      - run: cargo clippy --all-targets --features dev -- -D warnings
 
   test:
     runs-on: ubuntu-latest
     steps:
+      # The strict build runs the adr/0015 command gates (examples, paired
+      # tests, integration coverage, scenarios) via build.rs.
       - uses: actions/checkout@v4
       - run: cargo test
+      - run: cargo test --features dev
 
   doc:
     runs-on: ubuntu-latest

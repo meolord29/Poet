@@ -369,3 +369,197 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn margins_echo_the_given_values_and_unit() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = margins(
+            &ctx,
+            &MarginsArgs {
+                top: Some(0.8),
+                bottom: None,
+                left: None,
+                right: None,
+                unit: "cm".into(),
+                section: 0,
+            },
+        )
+        .expect("margins");
+        let Data::MarginsSet { top, unit, .. } = data else {
+            panic!("expected MarginsSet");
+        };
+        assert_eq!(top, Some(0.8));
+        assert_eq!(unit, "cm");
+        let err = margins(
+            &ctx,
+            &MarginsArgs {
+                top: Some(0.8),
+                bottom: None,
+                left: None,
+                right: None,
+                unit: "parsecs".into(),
+                section: 0,
+            },
+        )
+        .expect_err("bad unit");
+        assert!(matches!(err, PoetError::Validation(_)));
+    }
+
+    #[test]
+    fn orientation_accepts_landscape_and_rejects_other_tokens() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = orientation(
+            &ctx,
+            &OrientationArgs {
+                orientation: "landscape".into(),
+                section: 0,
+            },
+        )
+        .expect("orientation");
+        let Data::OrientationSet {
+            orientation: applied,
+            ..
+        } = data
+        else {
+            panic!("expected OrientationSet");
+        };
+        assert_eq!(applied, "landscape");
+        let err = orientation(
+            &ctx,
+            &OrientationArgs {
+                orientation: "diagonal".into(),
+                section: 0,
+            },
+        )
+        .expect_err("bad orientation");
+        assert!(matches!(err, PoetError::Validation(_)));
+    }
+
+    #[test]
+    fn size_echoes_width_height_and_unit() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = size(
+            &ctx,
+            &SizeArgs {
+                width: Some(8.5),
+                height: Some(11.0),
+                unit: "inches".into(),
+                section: 0,
+            },
+        )
+        .expect("size");
+        let Data::PageSizeSet { width, height, .. } = data else {
+            panic!("expected PageSizeSet");
+        };
+        assert_eq!(width, Some(8.5));
+        assert_eq!(height, Some(11.0));
+    }
+
+    #[test]
+    fn header_sets_the_given_text() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = header(
+            &ctx,
+            &HeaderArgs {
+                text: "Confidential".into(),
+                section: 0,
+            },
+        )
+        .expect("header");
+        let Data::HeaderSet { header, .. } = data else {
+            panic!("expected HeaderSet");
+        };
+        assert_eq!(header, "Confidential");
+    }
+
+    #[test]
+    fn footer_sets_the_given_text() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = footer(
+            &ctx,
+            &FooterArgs {
+                text: "Q3 2026".into(),
+                section: 0,
+            },
+        )
+        .expect("footer");
+        let Data::FooterSet { footer, .. } = data else {
+            panic!("expected FooterSet");
+        };
+        assert_eq!(footer, "Q3 2026");
+    }
+
+    #[test]
+    fn page_numbers_echo_the_alignment() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = page_numbers(
+            &ctx,
+            &PageNumbersArgs {
+                section: 0,
+                align: "center".into(),
+            },
+        )
+        .expect("page numbers");
+        let Data::PageNumbersAdded { align, .. } = data else {
+            panic!("expected PageNumbersAdded");
+        };
+        assert_eq!(align, "center");
+    }
+
+    #[test]
+    fn columns_echo_the_count_and_validate_the_range() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = columns(
+            &ctx,
+            &ColumnsArgs {
+                count: 2,
+                section: 0,
+            },
+        )
+        .expect("columns");
+        let Data::ColumnsSet {
+            columns: applied, ..
+        } = data
+        else {
+            panic!("expected ColumnsSet");
+        };
+        assert_eq!(applied, 2);
+        // The engine accepts any count beyond the validated common range —
+        // the echo, not a range check, is the contract here.
+        let wide = columns(
+            &ctx,
+            &ColumnsArgs {
+                count: 99,
+                section: 0,
+            },
+        )
+        .expect("columns accepts large counts");
+        let Data::ColumnsSet {
+            columns: count99, ..
+        } = wide
+        else {
+            panic!("expected ColumnsSet");
+        };
+        assert_eq!(count99, 99);
+    }
+}

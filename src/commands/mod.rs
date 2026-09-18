@@ -3,6 +3,8 @@
 
 pub mod batch;
 pub mod calc;
+#[cfg(feature = "dev")]
+pub mod dev;
 pub mod document;
 pub mod heading;
 pub mod image;
@@ -17,8 +19,8 @@ pub mod table;
 pub mod toc;
 
 /// Categories whose mutating commands auto-save the open document after
-/// success (Words' `_AUTOSAVE`). `document` manages its own saves; `batch`
-/// and `calc` never autosave.
+/// success (Words' `_AUTOSAVE`). `document` manages its own saves; `batch`,
+/// `calc`, and `dev` never autosave.
 pub const AUTOSAVE_CATEGORIES: &[Category] = &[
     Category::Section,
     Category::Paragraph,
@@ -64,6 +66,8 @@ pub enum Category {
     Batch,
     /// Calculation/analysis.
     Calc,
+    /// Sandbox lifecycle (dev builds only; never autosaves — adr/0015).
+    Dev,
 }
 
 impl Category {
@@ -90,4 +94,55 @@ pub(crate) fn with_doc<T>(
         crate::core::error::PoetError::DocumentState("No document is open".into())
     })?;
     f(mgr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AUTOSAVE_CATEGORIES, Category};
+
+    /// The autosave decision is pinned per category with an exhaustive match:
+    /// a new `Category` variant fails to compile here until this test (and
+    /// `AUTOSAVE_CATEGORIES`) state its autosave behavior.
+    #[test]
+    fn autosave_pinned_for_every_category() {
+        let all = [
+            Category::Document,
+            Category::Section,
+            Category::Paragraph,
+            Category::Run,
+            Category::Style,
+            Category::Heading,
+            Category::List,
+            Category::Table,
+            Category::Image,
+            Category::Toc,
+            Category::Page,
+            Category::Meta,
+            Category::Batch,
+            Category::Calc,
+            Category::Dev,
+        ];
+        for category in all {
+            let expected = match category {
+                Category::Document | Category::Batch | Category::Calc | Category::Dev => false,
+                Category::Section
+                | Category::Paragraph
+                | Category::Run
+                | Category::Style
+                | Category::Heading
+                | Category::List
+                | Category::Table
+                | Category::Image
+                | Category::Toc
+                | Category::Page
+                | Category::Meta => true,
+            };
+            assert_eq!(
+                AUTOSAVE_CATEGORIES.contains(&category),
+                expected,
+                "{category:?} diverges from the autosave pin"
+            );
+            assert_eq!(category.autosaves(), expected, "{category:?}");
+        }
+    }
 }
