@@ -5,11 +5,13 @@
 //! plain text, non-JSON, clap's exit codes (0/2). No subcommand prints the
 //! howto text. `document new/open/save/close` manage the session exactly like
 //! Words' typer wrappers; all other successful categories auto-save the open
-//! document best-effort (Words' `_AUTOSAVE`).
+//! document best-effort (Words' `_AUTOSAVE`). The `completions` subcommand is
+//! a deliberate addition over Words (adr/0014): it prints the shell script
+//! raw, like the howto — not a JSON envelope.
 
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::commands::{self, Category};
 use crate::core::Ctx;
@@ -31,6 +33,11 @@ struct Cli {
 enum Commands {
     /// Print a comprehensive system prompt describing all commands.
     Howto,
+    /// Print a shell completion script (adr/0014).
+    Completions {
+        /// Shell to generate completions for.
+        shell: clap_complete::Shell,
+    },
     /// Document management commands.
     Document(CategoryArgs<commands::document::DocumentAction>),
     /// Section commands.
@@ -105,6 +112,12 @@ where
         // Words prints the howto as raw text, not a JSON envelope.
         return (Some(howto::HOWTO.to_string()), ExitCode::SUCCESS);
     }
+    if let Commands::Completions { shell } = &command {
+        let mut buf = Vec::new();
+        clap_complete::generate(*shell, &mut Cli::command(), "poet", &mut buf);
+        let script = String::from_utf8_lossy(&buf).into_owned();
+        return (Some(script), ExitCode::SUCCESS);
+    }
     let (category, result) = dispatch(&ctx, command);
     let (json, is_error) = render(&result);
     if !is_error && category.autosaves() {
@@ -142,11 +155,17 @@ fn end_session(ctx: &Ctx) -> Result<(), PoetError> {
 
 fn dispatch(ctx: &Ctx, command: Commands) -> (Category, Result<Data, PoetError>) {
     match command {
-        // `Howto` is intercepted in `run_with` (raw-text output, not an
-        // envelope); this arm only keeps the match exhaustive.
+        // `Howto` and `Completions` are intercepted in `run_with` (raw-text
+        // output, not an envelope); these arms only keep the match exhaustive.
         Commands::Howto => (
             Category::Document,
             Err(PoetError::Internal("howto handled at parse layer".into())),
+        ),
+        Commands::Completions { .. } => (
+            Category::Document,
+            Err(PoetError::Internal(
+                "completions handled at parse layer".into(),
+            )),
         ),
         Commands::Document(args) => match args.action {
             commands::document::DocumentAction::New(args) => {

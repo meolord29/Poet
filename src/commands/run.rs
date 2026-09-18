@@ -180,7 +180,8 @@ fn tri(bold: bool, no_bold: bool) -> Option<bool> {
     }
 }
 
-/// The `FormatFlags` args as a validated [`FormatSpec`].
+/// The `FormatFlags` args as a validated
+/// [`FormatSpec`](crate::core::design::FormatSpec).
 fn spec_of(flags: &FormatFlags) -> Result<crate::core::design::FormatSpec, PoetError> {
     let spec = crate::core::design::FormatSpec {
         bold: tri(flags.bold, flags.no_bold),

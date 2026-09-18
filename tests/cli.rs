@@ -95,6 +95,22 @@ fn no_subcommand_prints_howto_text_and_exits_0() {
 }
 
 #[test]
+fn completions_print_raw_scripts_and_exit_0() {
+    let (ctx, _dir) = setup();
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let (json, code) = run(&ctx, &["completions", shell]);
+        assert_eq!(code, ExitCode::SUCCESS, "shell: {shell}");
+        assert!(!json.is_empty(), "empty script for {shell}");
+        assert!(
+            !json.trim_start().starts_with('{'),
+            "completions are raw text, not a JSON envelope"
+        );
+    }
+    let (json, code) = run(&ctx, &["completions", "bash"]);
+    assert!(json.contains("poet"), "script should reference the binary");
+}
+
+#[test]
 fn unknown_action_exits_with_clap_usage_error_code() {
     let (ctx, _dir) = setup();
     let argv: Vec<String> = ["poet", "document", "frobnicate"]

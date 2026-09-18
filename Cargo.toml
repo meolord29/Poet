@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 docx-rs = "0.4"
 image = { version = "0.25", default-features = false, features = [
     "bmp",

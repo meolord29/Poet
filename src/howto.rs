@@ -27,4 +27,21 @@ mod tests {
         assert!(HOWTO.contains("batch"));
         assert!(!HOWTO.contains("\"filter\""), "phantom transform op");
     }
+
+    #[test]
+    fn howto_examples_match_the_actual_cli_surface() {
+        // Positional arguments stay positional (Words' howto drifted here).
+        assert!(!HOWTO.contains("insert --index"), "index is positional");
+        assert!(!HOWTO.contains("--rows 4"), "table add rows is positional");
+        // Every command category is represented, incl. previously-missing ones.
+        assert!(HOWTO.contains("paragraph border"));
+        assert!(HOWTO.contains("run emphasize"));
+        // The agent-facing error/exit-code tables are present.
+        assert!(HOWTO.contains("### Error Codes"));
+        assert!(HOWTO.contains("`document_state`"));
+        assert!(HOWTO.contains("`calculation_error`"));
+        assert!(HOWTO.contains("### Exit Codes"));
+        // Completions are documented (adr/0014).
+        assert!(HOWTO.contains("poet completions"));
+    }
 }

@@ -76,6 +76,10 @@ impl PoetError {
 mod tests {
     use super::PoetError;
 
+    /// The user-facing reference must list every code the enum can emit —
+    /// "if a human must keep two things in sync, that's a bug" (`AGENTS.md`).
+    const REFERENCE: &str = include_str!("../../docs/reference/error-codes.md");
+
     #[test]
     fn code_covers_every_variant_and_is_stable() {
         let cases: Vec<(PoetError, &str)> = vec![
@@ -93,6 +97,30 @@ mod tests {
         ];
         for (err, code) in cases {
             assert_eq!(err.code(), code);
+        }
+    }
+
+    #[test]
+    fn every_code_is_documented_in_the_reference() {
+        for code in [
+            PoetError::Session("".into()),
+            PoetError::Validation("".into()),
+            PoetError::Metadata("".into()),
+            PoetError::Calculation("".into()),
+            PoetError::File("".into()),
+            PoetError::NotFound("".into()),
+            PoetError::Conflict("".into()),
+            PoetError::DocumentState("".into()),
+            PoetError::Unsupported("".into()),
+            PoetError::NotImplemented("".into()),
+            PoetError::Internal("".into()),
+        ]
+        .map(|err| err.code())
+        {
+            assert!(
+                REFERENCE.contains(&format!("| `{code}` |")),
+                "docs/reference/error-codes.md is missing `{code}`"
+            );
         }
     }
 }
