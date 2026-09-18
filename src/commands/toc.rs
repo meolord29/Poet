@@ -96,3 +96,42 @@ mod tests {
         assert!(json.contains("\"levels\": \"1-2\""));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    #[test]
+    fn add_wraps_the_toc_field_in_a_bookmark() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        let data = add(
+            &ctx,
+            &AddArgs {
+                levels: "1-3".into(),
+                id: None,
+            },
+        )
+        .expect("toc add");
+        let Data::TocAdded { id, levels, .. } = data else {
+            panic!("expected TocAdded");
+        };
+        assert!(!id.is_empty());
+        assert_eq!(levels, "1-3");
+    }
+
+    #[test]
+    fn update_is_the_documented_noop_hint() {
+        let (ctx, _dir) = setup();
+        let data = update(&ctx, &UpdateArgs {}).expect("toc update");
+        let Data::TocUpdateHint { message } = data else {
+            panic!("expected TocUpdateHint");
+        };
+        assert!(message.to_lowercase().contains("word"), "{message}");
+    }
+}

@@ -27,6 +27,20 @@ use crate::models::data::Data;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    /// Dev-only example-atom capture target: run the command, print its
+    /// envelope, and write the atom (adr/0015). Release builds do not register
+    /// the flag (unknown-arg error, exit 2) — the QA agent probes that as a
+    /// surface-parity check.
+    #[cfg_attr(feature = "dev", arg(long, global = true, value_name = "PATH"))]
+    #[cfg_attr(not(feature = "dev"), arg(skip))]
+    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+    capture_example: Option<String>,
+    /// Dev-only session-dir override for this invocation (adr/0015): keeps
+    /// `session.json` inside the QA sandbox. Release builds reject the flag.
+    #[cfg_attr(feature = "dev", arg(long, global = true, value_name = "DIR"))]
+    #[cfg_attr(not(feature = "dev"), arg(skip))]
+    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+    dev_home: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -66,6 +80,9 @@ enum Commands {
     Batch(CategoryArgs<commands::batch::BatchAction>),
     /// Calculation and analysis commands.
     Calc(CategoryArgs<commands::calc::CalcAction>),
+    /// Sandbox lifecycle (dev builds only, adr/0015).
+    #[cfg(feature = "dev")]
+    Dev(CategoryArgs<commands::dev::DevAction>),
 }
 
 /// Wrapper turning a category's action enum into clap `Args`.
@@ -82,9 +99,22 @@ where
 {
     let mut argv = vec!["poet".to_string()];
     argv.extend(args);
+    // `--dev-home` must redirect the session repository before auto-open, so
+    // the dev hook resolves the context from raw argv (validated by clap
+    // inside `run_with`; adr/0015).
+    #[cfg(feature = "dev")]
+    let ctx = crate::core::dev::ctx_from_argv(&argv);
+    #[cfg(not(feature = "dev"))]
     let ctx = Ctx::from_env();
-    let (json, code) = run_with(ctx, argv);
+    let (json, code) = run_with(ctx, argv.iter().cloned());
     if let Some(line) = json {
+        // Capture runs after the real invocation, best-effort; the envelope
+        // on stdout is authoritative (adr/0015).
+        #[cfg(feature = "dev")]
+        if let Some(out) = crate::core::dev::scan_flag_value(&argv, crate::core::dev::CAPTURE_FLAG)
+        {
+            crate::core::dev::write_capture_example(&argv, &out, &line);
+        }
         println!("{line}");
     }
     code
@@ -429,5 +459,70 @@ fn dispatch(ctx: &Ctx, command: Commands) -> (Category, Result<Data, PoetError>)
                 (Category::Calc, commands::calc::transform(ctx, &a))
             }
         },
+        #[cfg(feature = "dev")]
+        Commands::Dev(args) => match args.action {
+            commands::dev::DevAction::Setup(a) => (Category::Dev, commands::dev::setup(ctx, &a)),
+            commands::dev::DevAction::Clean(a) => (Category::Dev, commands::dev::clean(ctx, &a)),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_surface_has_every_category() {
+        let cmd = Cli::command();
+        for name in [
+            "document",
+            "section",
+            "paragraph",
+            "run",
+            "style",
+            "heading",
+            "list",
+            "table",
+            "image",
+            "toc",
+            "page",
+            "meta",
+            "batch",
+            "calc",
+        ] {
+            assert!(cmd.find_subcommand(name).is_some(), "missing `{name}`");
+        }
+    }
+
+    #[test]
+    fn cli_has_no_help_subcommand() {
+        assert!(Cli::command().find_subcommand("help").is_none());
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn dev_surface_present_in_dev_build() {
+        let cmd = Cli::command();
+        assert!(cmd.find_subcommand("dev").is_some(), "dev group missing");
+        for flag in ["capture-example", "dev-home"] {
+            assert!(
+                cmd.get_arguments().any(|a| a.get_long() == Some(flag)),
+                "dev flag `--{flag}` missing"
+            );
+        }
+    }
+
+    #[cfg(not(feature = "dev"))]
+    #[test]
+    fn dev_surface_absent_in_release_build() {
+        let cmd = Cli::command();
+        assert!(cmd.find_subcommand("dev").is_none(), "dev group leaked");
+        for flag in ["capture-example", "dev-home"] {
+            assert!(
+                !cmd.get_arguments().any(|a| a.get_long() == Some(flag)),
+                "dev flag `--{flag}` leaked"
+            );
+        }
     }
 }

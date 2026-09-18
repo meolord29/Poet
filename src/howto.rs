@@ -44,4 +44,15 @@ mod tests {
         // Completions are documented (adr/0014).
         assert!(HOWTO.contains("poet completions"));
     }
+
+    #[test]
+    fn howto_never_documents_dev_surface() {
+        // The dev feature (adr/0015) must not leak into the shipped manual:
+        // the QA agent asserts the same invariant black-box against the
+        // release binary.
+        assert!(!HOWTO.contains("poet dev"));
+        assert!(!HOWTO.contains("capture-example"));
+        assert!(!HOWTO.contains("--dev-home"));
+        assert!(!HOWTO.contains(".sandbox"));
+    }
 }

@@ -162,3 +162,101 @@ mod tests {
         assert!(matches!(err, PoetError::Validation(_)));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::error::PoetError;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn add_returns_a_bookmarked_heading_payload() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = add(
+            &ctx,
+            &AddArgs {
+                text: "Overview".into(),
+                level: 1,
+                id: Some("head1".into()),
+            },
+        )
+        .expect("heading add");
+        let Data::HeadingAdded {
+            id, text, level, ..
+        } = data
+        else {
+            panic!("expected HeadingAdded");
+        };
+        assert_eq!(id, "head1");
+        assert_eq!(text, "Overview");
+        assert_eq!(level, 1);
+        let err = add(
+            &ctx,
+            &AddArgs {
+                text: "Bad".into(),
+                level: 10,
+                id: None,
+            },
+        )
+        .expect_err("level out of range");
+        assert!(matches!(err, PoetError::Validation(_)));
+    }
+
+    #[test]
+    fn set_level_remaps_the_heading_style() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Overview".into(),
+                level: 1,
+                id: Some("head1".into()),
+            },
+        )
+        .expect("heading add");
+        let data = set_level(
+            &ctx,
+            &SetLevelArgs {
+                level: 2,
+                id: Some("head1".into()),
+                index: None,
+            },
+        )
+        .expect("set level");
+        let Data::HeadingLevelSet { level, .. } = data else {
+            panic!("expected HeadingLevelSet");
+        };
+        assert_eq!(level, 2);
+    }
+
+    #[test]
+    fn list_returns_added_headings_in_order() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Chapter".into(),
+                level: 1,
+                id: None,
+            },
+        )
+        .expect("heading add");
+        let data = list(&ctx, &ListArgs {}).expect("heading list");
+        let Data::HeadingList { headings } = data else {
+            panic!("expected HeadingList");
+        };
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].text, "Chapter");
+    }
+}

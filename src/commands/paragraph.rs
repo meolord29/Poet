@@ -719,3 +719,287 @@ mod tests {
         assert!(matches!(err, PoetError::Validation(ref m) if m.contains("'middle'")));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn addr() -> AddressArgs {
+        AddressArgs {
+            id: Some("p1".into()),
+            index: None,
+        }
+    }
+
+    #[test]
+    fn update_replaces_text_in_place() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Before.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = update(
+            &ctx,
+            &UpdateArgs {
+                text: "After.".into(),
+                address: addr(),
+            },
+        )
+        .expect("update");
+        let Data::ParagraphUpdated { text, .. } = data else {
+            panic!("expected ParagraphUpdated");
+        };
+        assert_eq!(text, "After.");
+    }
+
+    #[test]
+    fn delete_removes_the_paragraph() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Doomed.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = delete(
+            &ctx,
+            &DeleteArgs {
+                address: addr(),
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        )
+        .expect("delete");
+        let Data::ParagraphDeleted { .. } = data else {
+            panic!("expected ParagraphDeleted");
+        };
+        assert!(
+            get(
+                &ctx,
+                &GetArgs {
+                    address: addr(),
+                    cell: CellArgs {
+                        table: None,
+                        row: None,
+                        col: None,
+                        para: None,
+                    },
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn list_lists_seeded_paragraphs_in_order() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "One.".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("add one");
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Two.".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("add two");
+        let data = list(&ctx, &ListArgs {}).expect("list");
+        let Data::ParagraphList { paragraphs } = data else {
+            panic!("expected ParagraphList");
+        };
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[1].text, "Two.");
+    }
+
+    #[test]
+    fn move_reports_the_new_position() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "First.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("add first");
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Second.".into(),
+                style: None,
+                id: Some("p2".into()),
+                page_break: false,
+            },
+        )
+        .expect("add second");
+        let data = r#move(
+            &ctx,
+            &MoveArgs {
+                direction: "down".into(),
+                address: addr(),
+            },
+        )
+        .expect("move");
+        let Data::ParagraphMoved {
+            index, direction, ..
+        } = data
+        else {
+            panic!("expected ParagraphMoved");
+        };
+        assert_eq!(index, 1);
+        assert_eq!(direction, "down");
+    }
+
+    #[test]
+    fn clear_empties_the_text_but_keeps_the_paragraph() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Vanishing.".into(),
+                style: None,
+                id: Some("p1".into()),
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = clear(&ctx, &ClearArgs { address: addr() }).expect("clear");
+        let Data::ParagraphCleared { .. } = data else {
+            panic!("expected ParagraphCleared");
+        };
+        let got = get(
+            &ctx,
+            &GetArgs {
+                address: addr(),
+                cell: CellArgs {
+                    table: None,
+                    row: None,
+                    col: None,
+                    para: None,
+                },
+            },
+        )
+        .expect("get after clear");
+        let Data::ParagraphGot { text, .. } = got else {
+            panic!("expected ParagraphGot");
+        };
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn find_finds_seeded_text_and_reports_the_count() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "The total is 42.".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = find(
+            &ctx,
+            &FindArgs {
+                text: "total".into(),
+            },
+        )
+        .expect("find");
+        let Data::ParagraphFound { count, results, .. } = data else {
+            panic!("expected ParagraphFound");
+        };
+        assert_eq!(count, results.len());
+        assert!(count >= 1);
+    }
+
+    #[test]
+    fn replace_counts_the_replacements() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        add(
+            &ctx,
+            &AddArgs {
+                text: "Draft one. Draft two.".into(),
+                style: None,
+                id: None,
+                page_break: false,
+            },
+        )
+        .expect("paragraph add");
+        let data = replace(
+            &ctx,
+            &ReplaceArgs {
+                find: "Draft".into(),
+                replace: "Final".into(),
+            },
+        )
+        .expect("replace");
+        let Data::ParagraphReplaced { count, .. } = data else {
+            panic!("expected ParagraphReplaced");
+        };
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn count_reports_the_body_paragraph_count() {
+        let (ctx, _dir) = setup();
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+        let data = count(&ctx, &CountArgs {}).expect("count");
+        let Data::ParagraphCount { count } = data else {
+            panic!("expected ParagraphCount");
+        };
+        assert_eq!(count, 0);
+    }
+}

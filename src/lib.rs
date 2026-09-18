@@ -7,7 +7,11 @@
 //! functions with the one true signature, `core` holds helpers/engine code,
 //! `models` holds the output payload enum.
 
-#![deny(missing_docs)]
+// Docs are mandatory in strict builds. Under the `dev` feature the gates
+// relax (adr/0015) so an in-flight command can be compiled and run to capture
+// a real envelope before its docs exist; `build.rs` rejects `dev` + release,
+// so an undocumented binary never ships.
+#![cfg_attr(not(feature = "dev"), deny(missing_docs))]
 
 pub mod app;
 pub mod commands;

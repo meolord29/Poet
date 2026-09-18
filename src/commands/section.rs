@@ -132,3 +132,78 @@ mod tests {
         assert!(json.contains("\"start_type\": \"new_page\""));
     }
 }
+
+#[cfg(test)]
+mod per_command_tests {
+    use crate::commands::testutil::setup;
+    use crate::core::error::PoetError;
+    use crate::models::data::Data;
+
+    use super::*;
+
+    fn open_doc(ctx: &crate::core::Ctx) {
+        let mut mgr = crate::core::document::DocumentManager::new();
+        mgr.create("docx").expect("create");
+        *ctx.doc.borrow_mut() = Some(mgr);
+    }
+
+    #[test]
+    fn list_reports_the_body_final_section() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = list(&ctx, &ListArgs {}).expect("list");
+        let Data::SectionList { sections, count } = data else {
+            panic!("expected SectionList");
+        };
+        assert_eq!(count, 1);
+        assert_eq!(sections[0].index, 0);
+        assert_eq!(sections[0].orientation, "portrait");
+    }
+
+    #[test]
+    fn info_returns_geometry_for_the_addressed_section() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = info(&ctx, &InfoArgs { index: 0 }).expect("info");
+        let Data::SectionDetail(detail) = data else {
+            panic!("expected SectionDetail");
+        };
+        assert_eq!(detail.index, 0);
+        assert!(detail.page_width.is_some());
+        let err = info(&ctx, &InfoArgs { index: 9 }).expect_err("out of range");
+        assert!(matches!(
+            err,
+            PoetError::Validation(_) | PoetError::NotFound(_)
+        ));
+    }
+
+    #[test]
+    fn add_reports_the_start_type_it_applied() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = add(
+            &ctx,
+            &AddArgs {
+                start_type: "new_page".into(),
+            },
+        )
+        .expect("add");
+        let Data::SectionAdded { start_type, .. } = data else {
+            panic!("expected SectionAdded");
+        };
+        // The echo is the argument as given; Words' normalization shows up
+        // in `section list` (`start_type: new_page` stays `new_page`).
+        assert_eq!(start_type, "new_page");
+    }
+
+    #[test]
+    fn page_break_inserts_a_hosting_paragraph_with_id() {
+        let (ctx, _dir) = setup();
+        open_doc(&ctx);
+        let data = page_break(&ctx, &PageBreakArgs {}).expect("page break");
+        let Data::PageBreakInserted { id, .. } = data else {
+            panic!("expected PageBreakInserted");
+        };
+        assert!(id.starts_with("p"), "{id}");
+    }
+}

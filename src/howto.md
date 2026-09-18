@@ -72,7 +72,7 @@ read fallback:
 
 ```bash
 poet paragraph get --index 3
-poet table set-cell --index 0 --row 1 --col 2 --value "x"
+poet table set-cell --index 0 1 2 "x"
 ```
 
 ### JSON Output Format
@@ -231,11 +231,11 @@ poet list set-level 2 --id l1
 poet table add 4 3 --id sales
 poet table list
 poet table get --id sales
-poet table set-cell --id sales --row 0 --col 0 --value "Product"
+poet table set-cell --id sales 0 0 "Product"
 poet table add-row --id sales --values '["X", 1, 2]'
 poet table add-column --id sales
-poet table delete-row --id sales --row 1
-poet table delete-column --id sales --col 1
+poet table delete-row --id sales 1
+poet table delete-column --id sales 1
 ```
 
 Bulk-fill from a 2D array (first row = header with `--header`, which auto-infers column types):

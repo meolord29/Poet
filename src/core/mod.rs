@@ -7,6 +7,8 @@ pub mod bookmark;
 pub mod calc;
 pub mod content;
 pub mod design;
+#[cfg(feature = "dev")]
+pub mod dev;
 pub mod document;
 pub mod error;
 pub mod export;
