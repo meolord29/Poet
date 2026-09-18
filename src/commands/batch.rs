@@ -1158,16 +1158,19 @@ mod tests {
     #[test]
     fn batch_meta_actions_record_history() {
         let (ctx, dir) = setup();
+        let docx = dir.join("m.docx").to_string_lossy().into_owned();
         let data = run_script(
             &ctx,
             &dir,
-            r#"[
-                {"cmd": "document", "action": "new", "path": "m.docx"},
-                {"cmd": "paragraph", "action": "add", "text": "hi", "id": "p"},
-                {"cmd": "meta", "action": "set-document", "metadata": {"title": "T"}},
-                {"cmd": "meta", "action": "history", "limit": 10},
-                {"cmd": "document", "action": "save", "path": "m.docx"}
-            ]"#,
+            &format!(
+                r#"[
+                {{"cmd": "document", "action": "new", "path": "{docx}"}},
+                {{"cmd": "paragraph", "action": "add", "text": "hi", "id": "p"}},
+                {{"cmd": "meta", "action": "set-document", "metadata": {{"title": "T"}}}},
+                {{"cmd": "meta", "action": "history", "limit": 10}},
+                {{"cmd": "document", "action": "save", "path": "{docx}"}}
+            ]"#
+            ),
         );
         let (executed, results) = as_batch(&data);
         assert_eq!(*executed, 5);
