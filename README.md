@@ -2,6 +2,8 @@
 
 > AI-First Word Document Automation CLI — Create, modify, read, and analyze **.docx** files with rich semantic metadata, entirely from the command line.
 
+`v0.1.0` · Linux/macOS · works with [opencode](https://opencode.ai) and claude code · MIT
+
 ## Features
 
 - **70+ CLI Commands** organized into 14 categories (document, section, paragraph, run, style, heading, list, table, image, toc, page, meta, batch, calc)
@@ -16,14 +18,33 @@
 
 ## Installation
 
-### Prerequisites
+One line:
 
-- A stable Rust toolchain (1.85+)
+```sh
+curl -LsSf https://github.com/meolord29/Poet/releases/latest/download/install.sh | sh
+```
+
+The installer prints a branded banner and an install plan — download source,
+checksum, binary destination, which agent apps it would register the skill
+into — and asks `proceed? [Y/n]` before downloading anything (Enter proceeds;
+piped/CI runs proceed without hanging). Decline with `n` and nothing is
+touched. The binary lands in `~/.local/bin` (add it to `PATH` if the installer
+says so). Update later with `poet upgrade` (it also refreshes the skill).
+
+If `opencode` or `claude` is on your machine, the installer asks whether to
+register the poet skill (each app, one by one; Enter registers); you can
+also register manually:
+
+```sh
+poet register --app opencode      # or: claude-code
+```
 
 ### Install from Source
 
+- A stable Rust toolchain (1.85+)
+
 ```bash
-git clone <repo-url>
+git clone https://github.com/meolord29/Poet poet
 cd poet
 cargo install --path .
 ```
@@ -240,9 +261,15 @@ Poet stores session/config in `~/.poet/` (override the home with `POET_HOME`):
 ## Testing
 
 ```bash
-cargo test                              # all tests
+cargo test --workspace                  # all tests (--workspace covers xtask)
 cargo test --lib                        # unit tests only
 ```
+
+## Contributing
+
+Everything for working on Poet — docs map, dev loop, release channels —
+lives in [docs/README.md](docs/README.md). `poet howto` prints the full
+command manual.
 
 ## Howto (AI System Prompt)
 
