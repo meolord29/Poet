@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+# Kept in lockstep with the root manifest: `cargo xtask bump` rewrites both
+# (adr/0016) — never diverge by hand.
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }

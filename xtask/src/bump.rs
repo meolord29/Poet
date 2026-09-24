@@ -1,0 +1,266 @@
+//! bump: the automated version ladder (adr/0016) — `cargo xtask bump <part>`.
+//!
+//! Mutates both manifests, rewrites any version-bearing example atoms, then
+//! refreshes the shared `Cargo.lock` with `cargo update -w` (workspace-member
+//! versions only — dependencies never move). Release builds are `--locked`, so
+//! the bump commit must carry the lock or the release lane fails. Git stays
+//! with the caller: release.yml commits the result as `chore(release): bump
+//! to X.Y.Z` and pushes it.
+
+use std::path::Path;
+use std::process::Command;
+
+use clap::ValueEnum;
+
+use crate::paths;
+
+/// Which version component the bump advances (adr/0016 ladder).
+#[derive(ValueEnum, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    /// Nightly merges: `X.Y.Z → X.Y.Z+1`.
+    Patch,
+    /// Promotion: `X.Y.Z → X.(Y+1).0`.
+    Minor,
+    /// Reserved for critical/official changes — manual, not wired into CI.
+    Major,
+}
+
+/// The example atoms whose captured envelopes embed the poet version. Empty
+/// until a version-bearing command lands (`register`/`upgrade` atoms are the
+/// expected first entries); the rewrite loop simply no-ops while this is
+/// empty. Only whitelisted atoms are ever touched — other atoms may embed
+/// *package* versions that must never move.
+const VERSION_ATOMS: &[&str] = &[];
+
+/// Run the bump: mutate manifests + atoms, refresh `Cargo.lock`. `part` steps
+/// the ladder (`patch`/`minor`/`major`); `to` sets an explicit target (the
+/// promotion bot lands `main`'s minor+1 exactly, adr/0016).
+pub fn run(part: Option<Part>, to: Option<String>) -> anyhow::Result<()> {
+    let old = read_root_version()?;
+    let new = match (part, to) {
+        (Some(part), None) => bump_version(&old, part)?,
+        (None, Some(to)) => {
+            if parse_triple(&to).is_none() {
+                anyhow::bail!("--to wants a plain X.Y.Z version, got `{to}`");
+            }
+            if to == old {
+                anyhow::bail!("--to {to} equals the current version (no-op)");
+            }
+            to
+        }
+        _ => anyhow::bail!("pass exactly one of <patch|minor|major> or --to <X.Y.Z>"),
+    };
+    let root = paths::workspace_root();
+    write_manifest_version(&root.join("Cargo.toml"), &old, &new)?;
+    write_manifest_version(&root.join("xtask/Cargo.toml"), &old, &new)?;
+    for rel in VERSION_ATOMS {
+        rewrite_semvers(&root.join(rel), &new)?;
+    }
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+    let status = Command::new(&cargo).args(["update", "-w"]).status()?;
+    if !status.success() {
+        anyhow::bail!("cargo update -w failed after the bump");
+    }
+    println!("bumped {old} -> {new}");
+    Ok(())
+}
+
+/// The workspace manifest's current version.
+fn read_root_version() -> anyhow::Result<String> {
+    read_manifest_version(&paths::workspace_root().join("Cargo.toml"))
+}
+
+/// Read the first `version = "X.Y.Z"` line of a Cargo manifest.
+fn read_manifest_version(path: &Path) -> anyhow::Result<String> {
+    let text = std::fs::read_to_string(path)?;
+    version_line(&text)
+        .map(|v| v.to_string())
+        .ok_or_else(|| anyhow::anyhow!("no `version = \"…\"` line in {}", path.display()))
+}
+
+/// Replace the manifest's version line `OLD → NEW` (first occurrence only —
+/// dependency requirements like `anyhow = "1.0.99"` must never be touched).
+fn write_manifest_version(path: &Path, old: &str, new: &str) -> anyhow::Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let updated = text.replacen(
+        &format!("version = \"{old}\""),
+        &format!("version = \"{new}\""),
+        1,
+    );
+    if updated == text {
+        anyhow::bail!("no `version = \"{old}\"` line in {}", path.display());
+    }
+    std::fs::write(path, updated)?;
+    Ok(())
+}
+
+/// Find the first `version = "X.Y.Z"` manifest line; returns the bare value.
+fn version_line(text: &str) -> Option<&str> {
+    text.lines().find_map(|l| {
+        l.trim_start()
+            .strip_prefix("version")
+            .and_then(|r| r.strip_prefix(" = \""))
+            .and_then(|r| r.strip_suffix('"'))
+    })
+}
+
+/// `X.Y.Z → X.Y.Z+1 | X.(Y+1).0 | (X+1).0.0`; rejects anything non-numeric
+/// (prerelease suffixes etc.) — the ladder only ever produces plain triples.
+fn bump_version(old: &str, part: Part) -> anyhow::Result<String> {
+    let (mut maj, mut min, mut pat) = parse_triple(old)
+        .ok_or_else(|| anyhow::anyhow!("expected a plain X.Y.Z version, got `{old}`"))?;
+    match part {
+        Part::Patch => pat += 1,
+        Part::Minor => {
+            min += 1;
+            pat = 0;
+        }
+        Part::Major => {
+            maj += 1;
+            min = 0;
+            pat = 0;
+        }
+    }
+    Ok(format!("{maj}.{min}.{pat}"))
+}
+
+/// Parse a plain `d+.d+.d+` triple.
+fn parse_triple(v: &str) -> Option<(u64, u64, u64)> {
+    let nums: Vec<_> = v.split('.').collect();
+    if nums.len() != 3 {
+        return None;
+    }
+    let maj = nums[0].parse().ok()?;
+    let min = nums[1].parse().ok()?;
+    let pat = nums[2].parse().ok()?;
+    Some((maj, min, pat))
+}
+
+/// Rewrite every `d+.d+.d+` token in an atom to `new` — covers both the
+/// `"version":"X.Y.Z"` fields and human-readable mentions. The atom whitelist
+/// (see [`VERSION_ATOMS`]) guarantees no package versions are hit.
+fn rewrite_semvers(path: &Path, new: &str) -> anyhow::Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    std::fs::write(path, replace_semver_tokens(&text, new))?;
+    Ok(())
+}
+
+/// Pure core of [`rewrite_semvers`]: replace each maximal `d+.d+.d+` run.
+fn replace_semver_tokens(text: &str, new: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        match semver_end(rest) {
+            Some(end) => {
+                out.push_str(new);
+                rest = &rest[end..];
+            }
+            None => {
+                let ch = rest.chars().next().unwrap_or('\0');
+                out.push(ch);
+                rest = &rest[ch.len_utf8()..];
+            }
+        }
+    }
+    out
+}
+
+/// If `text` starts with a maximal `d+.d+.d+` run (exactly three numeric
+/// groups, not followed by a digit or dot), return its end offset.
+fn semver_end(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if !bytes.first().is_some_and(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut j = 0;
+    for group in 0..3 {
+        if !bytes.get(j).is_some_and(u8::is_ascii_digit) {
+            return None;
+        }
+        while bytes.get(j).is_some_and(u8::is_ascii_digit) {
+            j += 1;
+        }
+        if group < 2 {
+            if bytes.get(j) != Some(&b'.') {
+                return None;
+            }
+            j += 1;
+        }
+    }
+    if bytes
+        .get(j)
+        .is_some_and(|b| b.is_ascii_digit() || *b == b'.')
+    {
+        return None;
+    }
+    Some(j)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bump_math_follows_the_ladder() {
+        assert_eq!(bump_version("0.1.0", Part::Patch).unwrap(), "0.1.1");
+        assert_eq!(bump_version("0.1.7", Part::Minor).unwrap(), "0.2.0");
+        assert_eq!(bump_version("0.1.7", Part::Major).unwrap(), "1.0.0");
+        assert!(bump_version("0.1.0-nightly.1", Part::Patch).is_err());
+        assert!(bump_version("garbage", Part::Patch).is_err());
+    }
+
+    #[test]
+    fn version_line_finds_the_first_package_version() {
+        let manifest = "[package]\nname = \"poet\"\nversion = \"0.1.0\"\n";
+        assert_eq!(version_line(manifest), Some("0.1.0"));
+        assert_eq!(version_line("[package]\nname = \"x\"\n"), None);
+    }
+
+    #[test]
+    fn manifest_write_touches_only_the_version_line() {
+        let dir = std::env::temp_dir().join("xtask-bump-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("Cargo.toml");
+        std::fs::write(
+            &p,
+            "[package]\nversion = \"0.1.0\"\n[dependencies]\nanyhow = \"1.0.99\"\n",
+        )
+        .unwrap();
+        write_manifest_version(&p, "0.1.0", "0.1.1").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "[package]\nversion = \"0.1.1\"\n[dependencies]\nanyhow = \"1.0.99\"\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn semver_rewrite_hits_version_fields_and_messages() {
+        let atom = "**example:**\n\n```sh\npoet upgrade\n```\n\nResult (one envelope on stdout):\n```json\n{\"status\":\"ok\",\"message\":\"upgraded: 0.1.0\",\"data\":{\"upgraded\":true,\"version\":\"0.1.0\"}}\n```\n";
+        let out = replace_semver_tokens(atom, "0.1.1");
+        assert!(out.contains("\"upgraded: 0.1.1\""), "{out}");
+        assert!(out.contains("\"version\":\"0.1.1\""), "{out}");
+        assert!(!out.contains("0.1.0"), "{out}");
+    }
+
+    #[test]
+    fn semver_rewrite_leaves_non_token_runs_alone() {
+        assert_eq!(replace_semver_tokens("a 1.2 b", "9.9.9"), "a 1.2 b");
+        assert_eq!(
+            replace_semver_tokens("2026-09-24 v0.1.0", "9.9.9"),
+            "2026-09-24 v9.9.9"
+        );
+        assert_eq!(
+            replace_semver_tokens("edition = \"2024\"", "9.9.9"),
+            "edition = \"2024\""
+        );
+    }
+
+    #[test]
+    fn version_atoms_whitelist_starts_empty() {
+        assert!(
+            VERSION_ATOMS.is_empty(),
+            "populate only with real version-bearing atoms (register/upgrade)"
+        );
+    }
+}

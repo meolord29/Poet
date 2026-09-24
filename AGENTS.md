@@ -85,6 +85,10 @@ Validation is layered, cheapest-fails-fastest (carpenter model):
 ## Build & verify
 
 ```bash
-cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
+cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check
 cargo doc # must be warning-free
 ```
+
+`--workspace` is required: bare `cargo test`/`clippy` skips `xtask` (the version
+ladder, adr/0016). Enable the pre-commit fmt hook after clone:
+`git config core.hooksPath .githooks`.
