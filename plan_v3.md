@@ -179,7 +179,21 @@ branches + nightly pushed in one batch at the end).
 
 - [x] PR1 — version ladder + hooks + CI (merged to nightly locally)
 - [x] PR2 — register / upgrade / uninstall (merged to nightly locally)
-- [ ] PR3 — installer + plumbing + docs
-- [ ] PR4 — release pipeline (+ manual GitHub checklist handed to owner)
+- [x] PR3 — installer + plumbing + docs (merged to nightly locally)
+- [x] PR4 — release pipeline (+ ADR-0021; merged to nightly locally)
 - [ ] Final: push all branches + nightly to origin (owner OK), end-to-end drill
   (merge → nightly release → promotion PR → stable → recut → smoke)
+
+## Owner's manual follow-ups (after push)
+
+1. Create the `poet-release-bot` GitHub App + secrets (steps in
+   [docs/README.md](docs/README.md#releases-nightly--stable-main)).
+2. Create the two rulesets (main/nightly) per adr/0021 with the bypass actors.
+3. Required-check names must match exactly: the ci `gates` lanes, the release
+   `smoke` lanes, and `guard (only nightly merges into main)`.
+4. Run the `poet-dev-validate` QA agent against the pushed nightly once —
+   PR2 was a surface PR and its report requirement was satisfied by live
+   drills + `tests/install_surface.rs`, not by the agent itself (noted in
+   Notes); a one-pass agent run closes that gap.
+5. The first push to `nightly` publishes the rolling `nightly` prerelease and
+   proves the musl lane (see the PR4 note before pushing).
