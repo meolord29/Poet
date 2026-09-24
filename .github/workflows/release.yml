@@ -1,0 +1,467 @@
+name: release
+
+# Branch-governed channels (adr/0002) + automated version ladder (adr/0016):
+#   push to nightly → bump job commits the patch bump (X.Y.Z+1), the run
+#                     builds the BUMPED sha and rolls the `nightly` prerelease
+#   promotion PR     → promote-bump pushes main's minor+1.0.0 onto nightly via
+#                     the release-bot GitHub App (its pushes re-run PR checks);
+#                     the patch ladder pauses while the PR is open
+#   push to main     → publish immutable stable vX.Y.Z, then recut fast-forwards
+#                     nightly to the promotion merge (adr/0016)
+# PRs against nightly/main build + smoke against PR-local file:// artifacts
+# only — a PR can never publish. Only the nightly branch may merge into main
+# (ci.yml's guard job enforces that + the exact promotion version).
+on:
+  push:
+    branches: [nightly, main]
+  pull_request:
+    branches: [nightly, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # bot-pushed bump heads land while the pushing run is still building it —
+  # that cascade run (all jobs suppressed by the bump job's `if`) must never
+  # cancel the mainline run, so ladder pushes get their own group.
+  group: release-${{ github.ref }}-${{ github.triggering_actor.login == 'poet-release-bot[bot]' && 'bot' || 'mainline' }}
+  cancel-in-progress: true
+
+jobs:
+  # Patch ladder (adr/0016). Runs first on every nightly push: bumps the
+  # version, refreshes every derived surface, pushes `chore(release): bump
+  # to X.Y.Z` — then build/release consume the bumped sha so the nightly
+  # artifact REPORTS the new version. The push uses the release-bot App
+  # token: ruleset branch protection (adr/0021) declines GITHUB_TOKEN pushes
+  # (user-owned repos can't bypass the Actions integration), and the App is
+  # a bypass actor. App pushes DO fire workflows — the job-level `if` below
+  # suppresses that cascade run (a bot-pushed bump head was already built by
+  # the run that pushed it; build/release/smoke depend on this job and skip
+  # with it). No-ops (resolve sha = github.sha) on PRs and main pushes,
+  # while a promotion PR is open (ladder pause), or on an existing bump head.
+  bump:
+    name: bump (patch ladder)
+    if: >-
+      !(github.event_name == 'push' && github.ref_name == 'nightly' &&
+        github.triggering_actor.login == 'poet-release-bot[bot]' &&
+        startsWith(github.event.head_commit.message, 'chore(release): bump'))
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: decide
+        id: decide
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" = nightly ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.decide.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.decide.outputs.run == 'true'
+      - name: create app token
+        uses: actions/create-github-app-token@v1
+        id: app
+        if: steps.decide.outputs.run == 'true'
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: pause while a promotion PR is open
+        id: pause
+        if: steps.decide.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head nightly --state open --json number --jq 'length')
+          if [ "$n" -gt 0 ]; then
+            echo "paused=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::promotion PR open — patch ladder paused (adr/0016)"
+          fi
+      - name: bump patch + regen + push
+        id: do
+        if: steps.decide.outputs.run == 'true' && steps.pause.outputs.paused != 'true'
+        env:
+          TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -eu
+          if git log -1 --format=%s | grep -q '^chore(release): bump'; then
+            echo "::notice::head is already a bump commit — nothing to do"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cargo xtask bump patch
+          if git diff --quiet; then
+            echo "::error::cargo xtask bump produced no changes"
+            exit 1
+          fi
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+          git add -A
+          git commit -m "chore(release): bump to ${version}"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            # fully-qualified refspecs: the repo has both a nightly branch and
+            # a nightly release tag — a bare `nightly` dst is ambiguous and
+            # git refuses the push.
+            if git pull --rebase origin refs/heads/nightly && git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/nightly; then
+              pushed=1
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+          if [ "$pushed" != 1 ]; then
+            echo "::error::could not push the bump (lost 5 races) — rerun via workflow_dispatch"
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: resolve sha
+        id: resolve
+        if: always()
+        run: echo "sha=${{ steps.do.outputs.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: bump
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-14
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # the bumped sha on nightly pushes (adr/0016); the event sha elsewhere
+          ref: ${{ needs.bump.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: install musl-tools
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: package
+        run: |
+          strip target/${{ matrix.target }}/release/poet
+          tar -czf poet-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release poet
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: poet-${{ matrix.target }}
+          path: poet-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  # Promotion minor bump (adr/0016): when a nightly→main PR opens, the
+  # release-bot GitHub App pushes main's minor+1.0.0 onto the nightly head so
+  # the released stable IS the bump (main is frozen — only PR content reaches
+  # it). The App token (not GITHUB_TOKEN) is required: its pushes fire the
+  # synchronize event, so the PR's required checks re-run. Idempotent — skips
+  # when the version is already correct. Secrets: RELEASE_BOT_APP_ID +
+  # RELEASE_BOT_PRIVATE_KEY (adr/0016 setup).
+  promote-bump:
+    name: bump (promotion minor, release-bot)
+    if: >-
+      github.event_name == 'pull_request' && github.base_ref == 'main' &&
+      github.head_ref == 'nightly' &&
+      (github.event.action == 'opened' || github.event.action == 'reopened')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: expected = main's minor+1
+        id: expect
+        run: |
+          set -eu
+          git fetch origin main
+          base=$(git show origin/main:Cargo.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -n1)
+          IFS='.' read -r bmaj bmin _ <<<"$base"
+          echo "expected=${bmaj}.$((bmin+1)).0" >> "$GITHUB_OUTPUT"
+          echo "bmaj=${bmaj}" >> "$GITHUB_OUTPUT"
+      - name: create app token
+        uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: land the bump onto nightly (idempotent)
+        env:
+          EXPECTED: ${{ steps.expect.outputs.expected }}
+          BASE_MAJOR: ${{ steps.expect.outputs.bmaj }}
+          TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -eu
+          head=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+          if [ "$head" = "$EXPECTED" ]; then
+            echo "::notice::version already ${EXPECTED} — nothing to do"
+            exit 0
+          fi
+          IFS='.' read -r hmaj _ _ <<<"$head"
+          if [ "$hmaj" != "$BASE_MAJOR" ]; then
+            echo "::error::nightly is ${head} (major ${hmaj}) while main expects ${EXPECTED} — reconcile manually (adr/0016)"
+            exit 1
+          fi
+          git config user.name "poet-release-bot[bot]"
+          git config user.email "poet-release-bot[bot]@users.noreply.github.com"
+          cargo xtask bump --to "$EXPECTED"
+          git add -A
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+          git commit -m "chore(release): bump to ${version}"
+          git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/nightly
+
+  # Publish only on channel pushes (never from a PR); smoke still runs on PRs
+  # against PR-built artifacts.
+  release:
+    needs: [build, bump]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum poet-*.tar.gz > SHA256SUMS
+      - name: resolve channel
+        id: ch
+        run: |
+          set -eu
+          case "${GITHUB_REF_NAME}" in
+            nightly)
+              echo "tag=nightly" >> "$GITHUB_OUTPUT"
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              ;;
+            main)
+              version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+              echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              # stable's installer must fetch THIS release, never nightly: patch
+              # the tag in the copy we attach (the repo file stays nightly-default).
+              sed -i "s/^TAG=\"nightly\"$/TAG=\"v${version}\"/" scripts/install.sh
+              ;;
+            *) echo "unexpected ref ${GITHUB_REF_NAME}" >&2; exit 1 ;;
+          esac
+      - name: roll nightly release
+        if: steps.ch.outputs.tag == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.bump.outputs.sha }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/poet-*.tar.gz dist/SHA256SUMS scripts/install.sh \
+            --prerelease \
+            --target "$SHA" \
+            --title "poet nightly (${SHA::7})" \
+            --notes "Rolling prerelease (canary) from the nightly branch.
+
+          Unstable by design — the README serves stable only. Install (Linux x86_64, macOS Apple Silicon):
+
+              curl -LsSf https://github.com/meolord29/Poet/releases/download/nightly/install.sh | sh"
+      - name: publish stable release
+        if: steps.ch.outputs.tag != 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ch.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/poet-*.tar.gz dist/SHA256SUMS scripts/install.sh \
+            --target "$GITHUB_SHA" \
+            --title "poet ${TAG}" \
+            --notes "Stable release promoted from nightly (adr/0002).
+
+          Install (Linux x86_64, macOS Apple Silicon):
+
+              curl -LsSf https://github.com/meolord29/Poet/releases/latest/download/install.sh | sh
+
+          Rollback: install any previous vX.Y.Z release the same way, substituting its tag for \`latest\`."
+
+  # Recut (adr/0016): after a promotion publishes stable, fast-forward nightly
+  # to the promotion merge so the trunk absorbs main's merge commit and the
+  # ladder resumes at X.(Y+1).1. FF-only by construction — if nightly moved
+  # in between, fail loudly and reconcile by merging main back via a PR.
+  # Pushes via the release-bot App token (ruleset bypass, adr/0021); that push
+  # fires one nightly run whose bump job resumes the patch ladder immediately
+  # — its own bot-pushed bump commit is then cascade-suppressed by the bump
+  # job's `if`. Also runs on workflow_dispatch (main) to retry a failed recut
+  # without re-publishing.
+  recut:
+    name: recut nightly from main
+    needs: release
+    if: >-
+      github.ref_name == 'main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      # full history: a depth-1 checkout cannot negotiate a push of a merge
+      # commit whose parents it never fetched — the server rejects a valid
+      # fast-forward with "fetch first" (that is exactly how the first live
+      # recut failed while nightly was main's own second parent).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: create app token
+        uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: fast-forward nightly to the promotion merge
+        env:
+          TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -eu
+          if git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA":refs/heads/nightly; then
+            echo "::notice::nightly fast-forwarded to ${GITHUB_SHA::7}"
+          else
+            echo "::error::nightly moved since the promotion merge — reconcile (PR main into nightly), then workflow_dispatch this run on main"
+            exit 1
+          fi
+
+  # Smoke tier: verify the release artifact via the real installer pipeline —
+  # tarball, checksum, install.sh, register — on a clean runner, not just the
+  # repo tests (which run against a local file:// fixture). Triple-mode:
+  #   - push/nightly: the PUBLISHED nightly artifact via the literal nightly
+  #     one-liner (post-publish proof of the release pipeline)
+  #   - push/main: the PUBLISHED stable artifact via the /latest/ one-liner
+  #   - PR: this PR's build artifacts via POET_DOWNLOAD_BASE=file:// —
+  #     the same lanes run pre-merge, so smoke is a required check
+  # A REAL opencode is installed first (curl installer on Linux, curl + brew
+  # lanes on macOS) so install.sh's auto-register branch runs against the
+  # real agent app. The diagnostic step reports which path each side chose
+  # (evidence for the macOS skill-path mismatch); assertions stay dual-path
+  # until triaged.
+  smoke:
+    name: smoke (${{ matrix.os }} / opencode via ${{ matrix.opencode_install }})
+    needs: [build, release]
+    if: >-
+      !cancelled() && needs.build.result == 'success' &&
+      (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            opencode_install: script
+            target: x86_64-unknown-linux-musl
+          - os: macos-14
+            opencode_install: script
+            target: aarch64-apple-darwin
+          - os: macos-14
+            opencode_install: brew
+            target: aarch64-apple-darwin
+    env:
+      POET_INSTALL_DIR: ${{ github.workspace }}/poet-bin
+      OPENCODE_DISABLE_AUTOUPDATE: "1"
+    steps:
+      - name: checkout (PR mode — install.sh from the PR head)
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+      - name: fetch PR-built artifacts (PR mode)
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: poet-${{ matrix.target }}
+          path: dist
+      - name: checksums (PR mode)
+        if: github.event_name == 'pull_request'
+        run: |
+          cd dist
+          case "$(uname -s)" in
+            Darwin) shasum -a 256 poet-${{ matrix.target }}.tar.gz > SHA256SUMS ;;
+            *) sha256sum poet-${{ matrix.target }}.tar.gz > SHA256SUMS ;;
+          esac
+      - name: install opencode (script)
+        if: matrix.opencode_install == 'script'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Resolve latest via an authenticated call and pass --version: the
+          # installer's unpinned path hits api.github.com anonymously, which is
+          # rate-limited (60/hr per shared runner IP) and fails the smoke lane.
+          ver="$(gh api repos/anomalyco/opencode/releases/latest --jq '.tag_name')"
+          ver="${ver#v}"
+          [ -n "$ver" ] || { echo "::error::failed to resolve latest opencode version"; exit 1; }
+          echo "installing opencode v${ver}"
+          curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path --version "$ver"
+          export PATH="$HOME/.opencode/bin:$PATH"
+          command -v opencode
+          opencode --version
+      - name: install opencode (brew)
+        if: matrix.opencode_install == 'brew'
+        run: |
+          brew install anomalyco/tap/opencode
+          command -v opencode
+          opencode --version
+      - name: install via the real user one-liner
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            POET_DOWNLOAD_BASE="file://${GITHUB_WORKSPACE}/dist" sh scripts/install.sh
+          elif [ "$GITHUB_REF_NAME" = "nightly" ]; then
+            curl -LsSf https://github.com/meolord29/Poet/releases/download/nightly/install.sh | sh
+          else
+            curl -LsSf https://github.com/meolord29/Poet/releases/latest/download/install.sh | sh
+          fi
+      - name: path report (diagnostic — never fails)
+        if: always()
+        run: |
+          say() { printf 'smoke-diag: %s\n' "$1"; }
+          say "=== environment ==="
+          say "runner: $RUNNER_OS ($RUNNER_ARCH)"
+          say "HOME=$HOME"
+          say "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-<unset>}"
+          say "opencode on PATH: $(command -v opencode || echo 'not-found')"
+          opencode --version 2>/dev/null || say "opencode --version: failed"
+          say "=== poet's claim (register envelope) ==="
+          "$POET_INSTALL_DIR/poet" register --app opencode \
+            || say "poet register: failed"
+          say "=== filesystem truth ==="
+          for root in "$HOME/.config/opencode" \
+                      "$HOME/Library/Application Support/opencode" \
+                      "/Library/Application Support/opencode"; do
+            skill="$root/skills/poet/SKILL.md"
+            if [ -f "$skill" ]; then say "PRESENT: $skill"; else say "absent:  $skill"; fi
+          done
+          say "=== opencode's own view ==="
+          opencode debug --help 2>&1 | sed 's/^/  /'
+          if opencode debug config > /dev/null 2>&1; then
+            opencode debug config 2>/dev/null \
+              | grep -iE 'config|skill|poet' | sed 's/^/  /' \
+              || say "  (no config/skill/poet lines in resolved config)"
+          else
+            say "  opencode debug config: unavailable"
+          fi
+          exit 0
+      - name: assert shipped surface
+        run: |
+          set -eu
+          BIN="$POET_INSTALL_DIR/poet"
+          test -x "$BIN"
+          "$BIN" --version
+          "$BIN" howto > howto.md && test -s howto.md
+          "$BIN" register --app opencode | grep '"status":"ok"'
+          test -f "$HOME/.config/opencode/skills/poet/SKILL.md" \
+            || test -f "$HOME/Library/Application Support/opencode/skills/poet/SKILL.md"
+      - name: uninstall reverses the footprint
+        run: |
+          set -eu
+          BIN="$POET_INSTALL_DIR/poet"
+          "$BIN" uninstall --bin-dir "$POET_INSTALL_DIR" | grep '"status":"ok"'
+          test ! -e "$BIN"
