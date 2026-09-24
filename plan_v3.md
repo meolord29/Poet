@@ -19,28 +19,30 @@ Scope decisions (owner-approved):
 
 Branch: `ivan/infra-1-ladder` off `nightly`.
 
-- [ ] Root `Cargo.toml`: `[workspace] members = ["xtask"]`.
-- [ ] `xtask/` crate (clap + anyhow only, edition 2024):
+- [x] Root `Cargo.toml`: `[workspace] members = ["xtask"]`.
+- [x] `xtask/` crate (clap + anyhow only, edition 2024):
   - `cargo xtask bump patch|minor|major|--to X.Y.Z` — port of carpenter
     `xtask/src/bump.rs`. Differences: no `gen-howto`/`gen-specs` (Poet's howto is
     static, gates live in `build.rs`); derived-surface step = `cargo update -w`
     (refreshes only workspace-member versions in `Cargo.lock` — release builds are
     `--locked`, so the bump commit must carry the lock).
   - `VERSION_ATOMS` starts empty; PR2's register/upgrade atoms (which embed the
-    version in captured envelopes) are added there.
+    version in captured envelopes) are added there. _(done in PR2, drift test
+    included)_
   - hooks drift test: `.githooks/pre-commit` present + executable (carpenter `hooks.rs`).
   - `paths.rs` port (workspace_root via CARGO_MANIFEST_DIR).
-- [ ] `.cargo/config.toml` (`xtask` alias); `.githooks/pre-commit` (fmt gate on staged
+- [x] `.cargo/config.toml` (`xtask` alias); `.githooks/pre-commit` (fmt gate on staged
   `.rs`, carpenter port with poet wording); enable locally:
   `git config core.hooksPath .githooks`.
-- [ ] `.github/workflows/ci.yml`: port carpenter's shape — concurrency group,
+- [x] `.github/workflows/ci.yml`: port carpenter's shape — concurrency group,
   ubuntu+macos-14 gates matrix, dtolnay/rust-toolchain + Swatinem/rust-cache,
-  shellcheck lane (Linux), `--workspace` everywhere, `RUSTDOCFLAGS=-D warnings` doc
+  `--workspace` everywhere, `RUSTDOCFLAGS=-D warnings` doc
   lane; keep Poet's extra `--features dev` clippy/test lanes; guard job gains the
-  promotion version assertion (exactly main's minor+1.0).
-- [ ] AGENTS.md § Build & verify: `--workspace` on test/clippy lines + hooksPath note.
-- [ ] ADR `docs/adr/0016-automated-version-ladder.md` (port of carpenter adr/022).
-- [ ] Gates: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D
+  promotion version assertion (exactly main's minor+1.0). _(the shellcheck lane
+  was deferred to PR3, when `scripts/install.sh` first exists — see Notes)_
+- [x] AGENTS.md § Build & verify: `--workspace` on test/clippy lines + hooksPath note.
+- [x] ADR `docs/adr/0016-automated-version-ladder.md` (port of carpenter adr/022).
+- [x] Gates: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D
   warnings && cargo clippy --all-targets --features dev -- -D warnings && cargo fmt
   --all --check && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`.
 
@@ -74,27 +76,31 @@ Branch: `ivan/infra-2-install-surface` off `nightly`.
 
 Branch: `ivan/infra-3-installer-docs` off `nightly`.
 
-- [ ] `scripts/install.sh`: carpenter port with poet branding (`POET` wordmark,
+- [x] `scripts/install.sh`: carpenter port with poet branding (`POET` wordmark,
   `poet:` prefix, amber-family palette), `POET_DOWNLOAD_BASE` / `POET_INSTALL_DIR`
   / `POET_INSTALL_YES` overrides, `skill.poet` permission hint, `TAG="nightly"`
-  line byte-identical (release.yml seds it for stable); shellcheck-clean.
-- [ ] `.github/CODEOWNERS` (`* @meolord29`); `.github/workflows/assign.yml`
+  line byte-identical (release.yml seds it for stable); shellcheck-clean
+  _(authoritatively by the CI lane — locally `sh -n` + the `tests/install_sh.rs`
+  end-to-end fixture run, see Notes)_.
+- [x] `.github/CODEOWNERS` (`* @meolord29`); `.github/workflows/assign.yml`
   (auto-assign PRs to meolord29).
-- [ ] PR template: "no version bumps — ladder automated" ground rule + Promotion PR
+- [x] PR template: "no version bumps — ladder automated" ground rule + Promotion PR
   section (carpenter port).
-- [ ] README: install one-liner
+- [x] README: install one-liner
   (`curl -LsSf https://github.com/meolord29/Poet/releases/latest/download/install.sh | sh`),
   nightly channel line, Contributing → docs/README.md.
-- [ ] New `docs/README.md`: docs map + contributing (quickstart, dev loop, channel
+- [x] New `docs/README.md`: docs map + contributing (quickstart, dev loop, channel
   diagram, PR ground rules, promotion checklist, release-bot prerequisite, ruleset
   protection, rollback). `docs/adr/README.md` index.
-- [ ] ADR `0017-install-consent-and-banner.md` (carpenter adr/024 port).
+- [x] ADR installer consent + banner — landed as
+  `0020-install-consent-and-banner.md` (carpenter adr/024 port; renumbered from
+  0017 so ADR numbers land in merge order).
 
 ## PR4 — release pipeline + GitHub-side setup
 
 Branch: `ivan/infra-4-release` off `nightly`.
 
-- [ ] `.github/workflows/release.yml` — port all six jobs, poet-adapted:
+- [x] `.github/workflows/release.yml` — port all six jobs, poet-adapted:
   `bump` (patch ladder via App token, promotion-pause, cascade suppression,
   `refs/heads/nightly` refspec), `build` (matrix `x86_64-unknown-linux-musl` +
   `aarch64-apple-darwin`, strip + tar), `promote-bump` (main's minor+1.0.0 via App
@@ -102,6 +108,8 @@ Branch: `ivan/infra-4-release` off `nightly`.
   SHA256SUMS + tag-patched installer), `recut` (FF nightly via App), `smoke`
   (real opencode via script + brew lanes, PR `file://` mode, asserts `poet howto`,
   `poet register --app opencode`, SKILL.md presence, `poet uninstall` reversal).
+  _(workflow YAML validated; the ladder itself is only proven live by the first
+  nightly push — see the musl note)_
 - [x] ADR `0018-ruleset-bypass-actors.md` → landed as
   `0021-ruleset-bypass-actors.md` (carpenter adr/023 port; renumbered so ADR
   numbers land in merge order).
@@ -130,7 +138,7 @@ branches + nightly pushed in one batch at the end).
 
 - **PR1:** the CI `shellcheck` lane was moved out of PR1 into PR3 (it lints
   `scripts/install.sh`, which only exists from PR3 on — landing it early would
-  keep CI red between merges). Re-add the step in the PR3 ci.yml touch.
+  keep CI red between merges). _(done: the lane is in ci.yml since PR3.)_
 - **PR1:** `cargo xtask bump` drill left `xtask/Cargo.toml` untracked at
   0.1.1 briefly (git checkout refused a mix of tracked/untracked paths) —
   fixed by hand before commit; the committed tree is consistent at 0.1.0.
