@@ -31,7 +31,9 @@ rhai = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
-zip = "8"
+# default-features off: the defaults pull `zstd-sys` (C toolchain) into the
+# graph, which breaks the static musl release build; .docx needs deflate only.
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

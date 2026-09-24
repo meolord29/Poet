@@ -102,16 +102,23 @@ Branch: `ivan/infra-4-release` off `nightly`.
   SHA256SUMS + tag-patched installer), `recut` (FF nightly via App), `smoke`
   (real opencode via script + brew lanes, PR `file://` mode, asserts `poet howto`,
   `poet register --app opencode`, SKILL.md presence, `poet uninstall` reversal).
-- [ ] ADR `0018-ruleset-bypass-actors.md` (carpenter adr/023 port).
+- [x] ADR `0018-ruleset-bypass-actors.md` → landed as
+  `0021-ruleset-bypass-actors.md` (carpenter adr/023 port; renumbered so ADR
+  numbers land in merge order).
 - [ ] **Manual setup checklist** (documented in docs/README.md; needs GitHub admin):
   create `poet-release-bot` GitHub App (contents:write, PRs:write), install on the
   repo, add `RELEASE_BOT_APP_ID`/`RELEASE_BOT_PRIVATE_KEY` secrets; rulesets:
   `main` (PR + codeowner review + required checks incl.
   `guard (only nightly merges into main)`, strict, owner bypass) and `nightly`
   (required gates+smoke checks; bypass actors: owner + App).
-- [ ] Early risk check: `cargo build --release --target x86_64-unknown-linux-musl`
-  locally (polars/image static-link risk). Fallback if it fails: gnu target for the
-  linux lane.
+- [x] Early risk check: musl build — **partially resolved**. The original
+  blocker (`zstd-sys` C toolchain, pulled by `zip` default features) was
+  eliminated by switching the zip dep to `default-features = false, features
+  = ["deflate-flate2"]` (.docx needs deflate only; all remaining zip backends
+  are pure Rust). A second blocker remains: `psm` (via polars → stacker)
+  needs `musl-gcc`, which the release lane installs on the runner
+  (`musl-tools`, carpenter-identical). **Local verification is impossible
+  (no root to install musl-tools)** — see Notes.
 
 ## Execution protocol
 
@@ -150,6 +157,23 @@ branches + nightly pushed in one batch at the end).
 - **PR2:** no `poet deregister` command (carpenter has one) — the reversal
   path is `uninstall`; core `skill::deregister` exists for it. Minimal
   surface; reconsider if single-app deregistration is ever needed.
+- **PR4 (review at first nightly run):** the musl release build could not be
+  verified locally (no root to install `musl-tools`; `psm` via polars →
+  stacker needs `musl-gcc`). `zstd-sys` was trimmed from the graph (zip
+  feature change, PR4 commit), so `psm` is the only remaining C consumer.
+  If the first release-lane build goes red on musl, the fallback is: switch
+  the linux target to `x86_64-unknown-linux-gnu` in `release.yml` + the
+  installer's platform table + `core::release::target_for` + the
+  `tests/install_sh.rs` fixture — four places, one commit.
+- **PR4:** `shellcheck` is not installed locally (no root); the installer
+  was checked with `sh -n` + driven end-to-end by `tests/install_sh.rs`
+  against a `file://` fixture. The CI `shellcheck` lane is the authoritative
+  lint — expect it green (the script is a close carpenter port) but verify
+  on the first CI run.
+- **PR4:** release.yml/smoke reference `meolord29/Poet` casing from the git
+  remote; if the GitHub repo slug ever changes casing, update
+  `scripts/install.sh` REPO, `core/release.rs` REPO (pinned by test), the
+  workflow smoke URLs, and the README one-liners.
 
 ## Status
 
