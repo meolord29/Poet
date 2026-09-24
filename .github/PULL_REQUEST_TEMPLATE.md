@@ -15,6 +15,8 @@
 - [ ] If the CLI surface or document workflow changed:
       `.opencode/agents/poet-dev-validate.md` (the QA agent's checklist/prompt)
       is updated to match in this PR.
+- [ ] No version bumps in this PR — the ladder is automated (adr/0016): patch
+      on merge into nightly, minor via the release-bot on promotion.
 - [ ] A **poet-dev-validate report** is attached below — **required when this
       PR changes user-facing surface** (commands, envelope shapes, workflow,
       howto contract): the document-building simulation ran smoothly end to
@@ -30,3 +32,12 @@
       that building the requested document succeeded smoothly. Run the agent
       with the PR branch checked out. Otherwise: one line explaining the N/A
       + what contract validation covered the change. -->
+
+---
+
+## Promotion PR (nightly → main only)
+
+- [ ] The `promote-bump` bot committed `chore(release): bump to <main's
+      minor+1>.0` onto nightly when this PR opened, and `guard` is green
+      (adr/0016 — versions are never bumped by hand).
+- [ ] Head branch is `nightly` — the `guard` check enforces this.

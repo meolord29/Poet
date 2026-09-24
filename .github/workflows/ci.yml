@@ -61,6 +61,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: fmt
         run: cargo fmt --all -- --check
+      - name: shellcheck installer
+        if: runner.os == 'Linux'
+        run: shellcheck scripts/install.sh
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       # The dev feature (adr/0015) must not rot: it is compiled and linted too.
