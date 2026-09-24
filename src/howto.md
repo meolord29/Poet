@@ -458,6 +458,24 @@ poet batch run report.phase2.json
 | batch | run, template |
 | calc | read, stats, aggregate, filter, transform |
 
+## INSTALL & AGENT INTEGRATION
+
+Register the poet skill into an AI coding agent so it can drive this CLI:
+
+```sh
+poet register --app opencode      # or: claude-code
+poet register --app opencode --print-skill   # preview the SKILL.md, no writes
+```
+
+opencode anchors at `$XDG_CONFIG_HOME/opencode/skills/poet/SKILL.md` (+ a `permission.skill.poet: "allow"` entry in `opencode.json`); claude code auto-discovers `~/.claude/skills/poet/SKILL.md`. Re-registering is idempotent and refreshes the manual to the installed version.
+
+```sh
+poet upgrade                      # latest stable; --channel nightly for the canary
+poet uninstall --bin-dir ~/.local/bin
+```
+
+`upgrade` fetches the published tarball for this platform, verifies its SHA256, replaces the binary (default `~/.local/bin`), and refreshes every already-registered app's skill. `uninstall` removes the skill from registered apps first, then the binary; it never touches `~/.poet` session data.
+
 ## BEST PRACTICES
 
 1. Create/open a document before other commands (or use `batch run`).

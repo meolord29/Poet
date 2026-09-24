@@ -48,25 +48,27 @@ Branch: `ivan/infra-1-ladder` off `nightly`.
 
 Branch: `ivan/infra-2-install-surface` off `nightly`.
 
-- [ ] `src/core/` helpers + `src/commands/{register,upgrade,uninstall}.rs` (one
+- [x] `src/core/` helpers + `src/commands/{register,upgrade,uninstall}.rs` (one
   signature everywhere: `pub fn <action>(ctx: &Ctx, args: <Args>) -> Result<Data,
   PoetError>`).
-  - `register --app opencode|claude-code`: writes `skills/poet/SKILL.md`
-    (opencode: `$XDG_CONFIG_HOME/opencode` or `~/Library/Application
-    Support/opencode`; claude: `~/.claude/skills/poet/SKILL.md`), idempotent, ok
-    envelope echoes the path.
-  - `upgrade [--channel stable|nightly]`: fetch tarball + SHA256SUMS via curl
-    subprocess (no new deps), verify checksum, swap binary, refresh skill.
-  - `uninstall [--bin-dir]`: remove binary + registered skills.
-- [ ] Skill content: frontmatter (name/description) + pointer to `poet howto`.
-- [ ] adr/0015 gates auto-enroll: example atoms
-  `docs/examples/<cat>/<action>.md` (captured envelopes), paired tests, integration
-  invocations, `Data` variants in `src/models/examples.rs`. Register/upgrade atoms
-  are version-bearing → add to xtask `VERSION_ATOMS`.
-- [ ] ADRs: `0019-skill-integration.md` (carpenter 006+009),
-  `0020-upgrade-fetches-release.md` (carpenter 018), `0021-uninstall-semantics.md`
-  (carpenter 019). Numbering gap 0017/0018 reserved by PR3/PR4 — file ADRs in
-  numeric order at merge time (renumber if needed).
+  - `register --app opencode|claude-code [--print-skill]`: writes
+    `skills/poet/SKILL.md` (opencode: `$XDG_CONFIG_HOME/opencode`; claude:
+    `~/.claude/skills/poet/SKILL.md`), idempotent, merges
+    `permission.skill.poet:"allow"` into `opencode.json`, ok envelope echoes the path.
+  - `upgrade [--channel stable|nightly] [--bin-dir] [--no-skill]`: fetch tarball +
+    SHA256SUMS via curl subprocess, verify, probe, atomic swap, refresh registered
+    skills.
+  - `uninstall [--bin-dir]`: remove skills first, binary last; `not_found` when
+    neither exists.
+- [x] Skill content: frontmatter + authored prose/workflow + inlined `poet howto`
+  (H1 stripped) + version + binary path.
+- [x] adr/0015 gates: atoms `docs/examples/{register,upgrade,uninstall}/*.md`
+  (register/upgrade are version-bearing → added to xtask `VERSION_ATOMS` with a
+  drift test), paired tests, `tests/install_surface.rs` integration coverage,
+  `Data::{Register,PrintSkill,Upgrade,Uninstall}` examples in `models/examples.rs`.
+- [x] ADRs `0017-skill-integration.md`, `0018-upgrade-fetches-release.md`,
+  `0019-uninstall-semantics.md` (renumbered from the original 0019-0021 so ADR
+  numbers land in merge order; PR3 → 0020, PR4 → 0021).
 
 ## PR3 — installer + repo plumbing + docs
 
@@ -119,13 +121,40 @@ branches + nightly pushed in one batch at the end).
 
 ## Notes / review later
 
-_(appended as work progresses — anything that did not go as planned or needs a
-second look lands here)._
+- **PR1:** the CI `shellcheck` lane was moved out of PR1 into PR3 (it lints
+  `scripts/install.sh`, which only exists from PR3 on — landing it early would
+  keep CI red between merges). Re-add the step in the PR3 ci.yml touch.
+- **PR1:** `cargo xtask bump` drill left `xtask/Cargo.toml` untracked at
+  0.1.1 briefly (git checkout refused a mix of tracked/untracked paths) —
+  fixed by hand before commit; the committed tree is consistent at 0.1.0.
+- **PR2:** `Data::message()` returns `&str`, so the install commands use
+  static envelope messages (`"skill registered"`, `"upgraded"`,
+  `"uninstalled"`) where carpenter interpolates app/version — those values
+  are already in `data`; revisit only if envelope-message parity matters.
+- **PR2:** Poet is edition 2024, where `std::env::set_var` is `unsafe` — the
+  `POET_DOWNLOAD_BASE` unreachable-download test moved from a unit test (env
+  mutation) to a process-level integration test (`tests/install_surface.rs`,
+  env set on the spawned child only). Carpenter's in-process version is not
+  portable to this edition.
+- **PR2 (incident, resolved):** the live `register` drill was first run
+  without `XDG_CONFIG_HOME`/`HOME` overrides and wrote the real
+  `~/.config/opencode/skills/poet/SKILL.md` + merged `"poet": "allow"` into
+  the real `opencode.json` (unrelated keys preserved — the merge logic is
+  now real-file-validated). Both reverted by hand. Lesson recorded: always
+  export the isolated env **before** the first drill invocation.
+- **PR2 (deviation, accepted):** carpenter's `Paths` config layering
+  (`config.bin_dir`/`config.source_dir`) is not ported — Poet has no config
+  feature yet; `--bin-dir` defaults to `~/.local/bin` directly. `--source`
+  rebuild mode dropped for the same reason (no generated surfaces; dev loop
+  is plain cargo). Add both with the config feature if it ever lands.
+- **PR2:** no `poet deregister` command (carpenter has one) — the reversal
+  path is `uninstall`; core `skill::deregister` exists for it. Minimal
+  surface; reconsider if single-app deregistration is ever needed.
 
 ## Status
 
-- [ ] PR1 — version ladder + hooks + CI
-- [ ] PR2 — register / upgrade / uninstall
+- [x] PR1 — version ladder + hooks + CI (merged to nightly locally)
+- [x] PR2 — register / upgrade / uninstall (merged to nightly locally)
 - [ ] PR3 — installer + plumbing + docs
 - [ ] PR4 — release pipeline (+ manual GitHub checklist handed to owner)
 - [ ] Final: push all branches + nightly to origin (owner OK), end-to-end drill
