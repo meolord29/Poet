@@ -178,6 +178,19 @@ branches + nightly pushed in one batch at the end).
   against a `file://` fixture. The CI `shellcheck` lane is the authoritative
   lint — expect it green (the script is a close carpenter port) but verify
   on the first CI run.
+- **CI run #1 (old nightly, resolved):** the first `nightly` CI run (Sep 18,
+  commit 300dc2b, pre-infra workflow) failed in `cargo test --features dev`
+  with a linker SIGBUS. Log evidence: `failed to write query cache … No
+  space left on device (os error 28)` immediately before `ld terminated with
+  signal 7`. Root cause: runner **disk exhaustion** — the old workflow ran
+  the plain and dev-feature test lanes in one job sharing `target/`, so the
+  dev rebuild's second full debug artifact set (plus debug incremental
+  caches) doubled the footprint on top of polars/image. Zero tests failed.
+  Fix: `CARGO_INCREMENTAL=0` at the ci.yml workflow level (incremental is a
+  local-dev feature only); the new workflow's rust-cache + matrix lanes
+  further shrink per-job footprints. Runner-image warnings (Node 20
+  deprecation on checkout@v4, ubuntu-latest → 26 migration) are advisory
+  only — revisit checkout@v5 at the next workflow touch.
 - **PR4:** release.yml/smoke reference `meolord29/Poet` casing from the git
   remote; if the GitHub repo slug ever changes casing, update
   `scripts/install.sh` REPO, `core/release.rs` REPO (pinned by test), the

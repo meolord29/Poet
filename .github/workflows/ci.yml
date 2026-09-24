@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Debug-incremental artifacts are pure disk waste in CI and filled the runner
+# disk on run #1 (`No space left on device` → SIGBUS in ld, the dev-feature
+# lane's second full debug rebuild). Incremental is only a local-dev feature.
+env:
+  CARGO_INCREMENTAL: "0"
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
