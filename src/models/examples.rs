@@ -792,6 +792,42 @@ pub fn envelope_examples() -> Vec<(&'static str, Data)> {
     ];
     #[cfg(feature = "dev")]
     out.extend(dev_examples());
+    // ---- install surface (adr/0019) ----
+    out.extend(vec![
+        (
+            "register",
+            Data::Register {
+                app: "opencode".into(),
+                path: "/home/u/.config/opencode/skills/poet/SKILL.md".into(),
+                version: "0.1.0".into(),
+                installed: true,
+            },
+        ),
+        (
+            "register --print-skill",
+            Data::PrintSkill {
+                skill: "---\nname: poet\ndescription: \"Word document automation\"\n---".into(),
+            },
+        ),
+        (
+            "upgrade",
+            Data::Upgrade {
+                upgraded: true,
+                version: "0.2.0".into(),
+                bin: "/home/u/.local/bin/poet".into(),
+                source: "https://github.com/meolord29/Poet/releases/latest/download/poet-x86_64-unknown-linux-musl.tar.gz".into(),
+                skill: Some(json!([{"refreshed": true, "app": "opencode", "path": "/home/u/.config/opencode/skills/poet/SKILL.md"}])),
+            },
+        ),
+        (
+            "uninstall",
+            Data::Uninstall {
+                uninstalled: true,
+                bin: Some("/home/u/.local/bin/poet".into()),
+                skill: json!([{"removed": true, "app": "opencode", "path": "/home/u/.config/opencode/skills/poet/SKILL.md"}]),
+            },
+        ),
+    ]);
     out
 }
 
@@ -853,8 +889,8 @@ mod tests {
     }
 
     /// Words' message-placement quirk, pinned per example: lifecycle commands
-    /// (plus the dev tooling) carry the envelope message; content commands
-    /// keep it inside `data` only.
+    /// (plus the dev tooling and the install surface) carry the envelope
+    /// message; content commands keep it inside `data` only.
     #[test]
     fn message_placement_follows_the_words_quirk() {
         for (cmd, data) in envelope_examples() {
@@ -862,7 +898,10 @@ mod tests {
                 || cmd.starts_with("document open")
                 || cmd.starts_with("document save")
                 || cmd.starts_with("document close")
-                || cmd.starts_with("dev ");
+                || cmd.starts_with("dev ")
+                || cmd.starts_with("register")
+                || cmd.starts_with("upgrade")
+                || cmd.starts_with("uninstall");
             if lifecycle {
                 assert!(!data.message().is_empty(), "{cmd}: lifecycle message empty");
             } else {

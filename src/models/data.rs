@@ -800,6 +800,47 @@ pub enum Data {
         /// Sandbox root directory (cwd-relative).
         path: String,
     },
+
+    // ---- install surface (register / upgrade / uninstall, adr/0019) ----
+    /// `register` — skill written into an agent app.
+    Register {
+        /// app name.
+        app: String,
+        /// skill file path.
+        path: String,
+        /// embedded version.
+        version: String,
+        /// always true.
+        installed: bool,
+    },
+    /// `register --print-skill`.
+    PrintSkill {
+        /// the rendered SKILL.md bytes.
+        skill: String,
+    },
+    /// `upgrade` — binary replaced from a published release (adr/0020).
+    Upgrade {
+        /// always true.
+        upgraded: bool,
+        /// new version.
+        version: String,
+        /// upgraded binary path.
+        bin: String,
+        /// upgrade origin: the release tarball URL.
+        source: String,
+        /// skill refresh outcome (`null` with `--no-skill`).
+        skill: Option<Value>,
+    },
+    /// `uninstall` — skill + binary removed (adr/0021).
+    Uninstall {
+        /// always true.
+        uninstalled: bool,
+        /// removed binary path (`null` if it was not present).
+        bin: Option<String>,
+        /// skill removal outcome: `[{removed:true,app,path},…]` or
+        /// `{removed:false,reason:"not_registered"}`.
+        skill: Value,
+    },
 }
 
 impl Data {
@@ -813,11 +854,17 @@ impl Data {
             | Data::DocumentSaved { message, .. }
             | Data::DocumentClosed { message } => message,
             // Dev lifecycle commands read best with a message in both places
-            // (they are tooling, not Words surface — adr/0015).
+            // (they are tooling, not Words surface — adr/0015). The install
+            // surface (adr/0019) follows carpenter's envelope style: the
+            // outcome summary is the envelope message.
             #[cfg(feature = "dev")]
             Data::DevSetup { .. } => "dev sandbox ready",
             #[cfg(feature = "dev")]
             Data::DevClean { .. } => "dev sandbox removed",
+            Data::Register { .. } => "skill registered",
+            Data::PrintSkill { .. } => "skill printed",
+            Data::Upgrade { .. } => "upgraded",
+            Data::Uninstall { .. } => "uninstalled",
             _ => "",
         }
     }

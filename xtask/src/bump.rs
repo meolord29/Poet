@@ -25,12 +25,14 @@ pub enum Part {
     Major,
 }
 
-/// The example atoms whose captured envelopes embed the poet version. Empty
-/// until a version-bearing command lands (`register`/`upgrade` atoms are the
-/// expected first entries); the rewrite loop simply no-ops while this is
-/// empty. Only whitelisted atoms are ever touched — other atoms may embed
-/// *package* versions that must never move.
-const VERSION_ATOMS: &[&str] = &[];
+/// The example atoms whose captured envelopes embed the poet version. Only
+/// whitelisted atoms are ever touched — other atoms may embed *package*
+/// versions that must never move. The register/upgrade envelopes carry
+/// `version`; uninstall's does not (adr/0021), so it stays off this list.
+const VERSION_ATOMS: &[&str] = &[
+    "docs/examples/register/register.md",
+    "docs/examples/upgrade/upgrade.md",
+];
 
 /// Run the bump: mutate manifests + atoms, refresh `Cargo.lock`. `part` steps
 /// the ladder (`patch`/`minor`/`major`); `to` sets an explicit target (the
@@ -257,10 +259,13 @@ mod tests {
     }
 
     #[test]
-    fn version_atoms_whitelist_starts_empty() {
-        assert!(
-            VERSION_ATOMS.is_empty(),
-            "populate only with real version-bearing atoms (register/upgrade)"
-        );
+    fn version_atoms_whitelist_covers_the_version_bearing_surface() {
+        for rel in VERSION_ATOMS {
+            let path = crate::paths::workspace_root().join(rel);
+            assert!(
+                path.is_file(),
+                "version atom {rel} missing — keep the whitelist in sync with docs/examples"
+            );
+        }
     }
 }

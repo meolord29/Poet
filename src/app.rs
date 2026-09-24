@@ -52,6 +52,12 @@ enum Commands {
         /// Shell to generate completions for.
         shell: clap_complete::Shell,
     },
+    /// Register the poet skill into an agent app (adr/0019).
+    Register(commands::register::RegisterArgs),
+    /// Self-upgrade from a published release (adr/0020).
+    Upgrade(commands::upgrade::UpgradeArgs),
+    /// Remove the binary and every registered skill (adr/0021).
+    Uninstall(commands::uninstall::UninstallArgs),
     /// Document management commands.
     Document(CategoryArgs<commands::document::DocumentAction>),
     /// Section commands.
@@ -196,6 +202,12 @@ fn dispatch(ctx: &Ctx, command: Commands) -> (Category, Result<Data, PoetError>)
             Err(PoetError::Internal(
                 "completions handled at parse layer".into(),
             )),
+        ),
+        Commands::Register(args) => (Category::Install, commands::register::register(ctx, &args)),
+        Commands::Upgrade(args) => (Category::Install, commands::upgrade::upgrade(ctx, &args)),
+        Commands::Uninstall(args) => (
+            Category::Install,
+            commands::uninstall::uninstall(ctx, &args),
         ),
         Commands::Document(args) => match args.action {
             commands::document::DocumentAction::New(args) => {
@@ -490,6 +502,9 @@ mod tests {
             "meta",
             "batch",
             "calc",
+            "register",
+            "upgrade",
+            "uninstall",
         ] {
             assert!(cmd.find_subcommand(name).is_some(), "missing `{name}`");
         }

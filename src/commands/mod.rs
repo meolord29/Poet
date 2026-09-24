@@ -12,11 +12,14 @@ pub mod list;
 pub mod meta;
 pub mod page;
 pub mod paragraph;
+pub mod register;
 pub mod run;
 pub mod section;
 pub mod style;
 pub mod table;
 pub mod toc;
+pub mod uninstall;
+pub mod upgrade;
 
 /// Categories whose mutating commands auto-save the open document after
 /// success (Words' `_AUTOSAVE`). `document` manages its own saves; `batch`,
@@ -68,6 +71,9 @@ pub enum Category {
     Calc,
     /// Sandbox lifecycle (dev builds only; never autosaves — adr/0015).
     Dev,
+    /// Install surface: register/upgrade/uninstall (never autosaves — no
+    /// document is involved; adr/0019).
+    Install,
 }
 
 impl Category {
@@ -121,10 +127,15 @@ mod tests {
             Category::Batch,
             Category::Calc,
             Category::Dev,
+            Category::Install,
         ];
         for category in all {
             let expected = match category {
-                Category::Document | Category::Batch | Category::Calc | Category::Dev => false,
+                Category::Document
+                | Category::Batch
+                | Category::Calc
+                | Category::Dev
+                | Category::Install => false,
                 Category::Section
                 | Category::Paragraph
                 | Category::Run

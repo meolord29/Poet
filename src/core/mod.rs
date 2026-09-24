@@ -14,7 +14,9 @@ pub mod error;
 pub mod export;
 pub mod meta;
 pub mod output;
+pub mod release;
 pub mod session;
+pub mod skill;
 
 use std::cell::RefCell;
 
